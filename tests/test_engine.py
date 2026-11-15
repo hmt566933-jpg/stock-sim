@@ -1,0 +1,144 @@
+"""離線測試：用隨機產生的假股價跑整套流程（不需要網路）。
+執行：python tests/test_engine.py
+"""
+import sys
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from simtrade import engine, strategies  # noqa: E402
+from simtrade.broker import Account, Costs  # noqa: E402
+
+
+def fake_long(symbols, start="2020-01-01", days=1200, seed=1):
+    rng = np.random.default_rng(seed)
+    dates = pd.bdate_range(start, periods=days)
+    rows = []
+    for k, s in enumerate(symbols):
+        r = rng.normal(0.0004 * ((k % 7) - 2) / 3, 0.02, days)
+        close = 100 * np.exp(np.cumsum(r))
+        open_ = close * np.exp(rng.normal(0, 0.005, days))
+        vol = (k % 5) * 3e5 * np.exp(rng.normal(0, 0.5, days))  # 第 k % 5 == 0 檔成交量為 0
+        hi = np.maximum(open_, close) * (1 + np.abs(rng.normal(0, 0.005, days)))
+        lo = np.minimum(open_, close) * (1 - np.abs(rng.normal(0, 0.005, days)))
+        for row in zip(dates, [s] * days, open_, hi, lo, close, vol):
+            rows.append(row)
+    return pd.DataFrame(rows, columns=["date", "symbol", "open", "high", "low", "close", "volume"])
+
+
+def test_costs():
+    c = Costs(fee_rate=0.001425, fee_discount=0.6, min_fee=20, etfs=("0050.TW",))
+    assert c.fee(10_000) == 20                      # 低於最低手續費
+    assert abs(c.fee(1_000_000) - 855) < 1e-6       # 1,000,000 × 0.1425% × 6 折
+    assert abs(c.tax("2330.TW", 100_000) - 300) < 1e-6
+    assert abs(c.tax("0050.TW", 100_000) - 100) < 1e-6
+
+
+def test_select_keeps_holdings():
+    idx = pd.bdate_range("2024-01-01", periods=3)
+    score = pd.DataFrame([[3, 2, 1], [1, 2, 3], [np.nan, np.nan, 9]], index=idx, columns=list("ABC"), dtype=float)
+    keep = pd.DataFrame([[1, 1, 1], [1, 1, 1], [0, 1, 1]], index=idx, columns=list("ABC")).astype(bool)
+    w = strategies.select(score, keep, k=2)
+    assert list(w.iloc[0] > 0) == [True, True, False]   # 挑分數最高的 A、B
+    assert list(w.iloc[1] > 0) == [True, True, False]   # 名次變了，但還沒出場就繼續抱
+    assert list(w.iloc[2] > 0) == [False, True, True]   # A 出場，空位補 C
+    assert abs(w.iloc[0].sum() - 1.0) < 1e-9
+
+
+def test_time_exit_and_stop_loss():
+    idx = pd.bdate_range("2024-01-01", periods=10)
+    score = pd.DataFrame({"A": [1.0] * 10, "B": [np.nan] * 10}, index=idx)
+    keep = pd.DataFrame(True, index=idx, columns=["A", "B"])
+    w = strategies.select(score, keep, k=1, max_hold=5)
+    held = (w["A"] > 0).tolist()
+    assert held[:5] == [True] * 5 and held[5] is False   # 第 5 天後出場，且當天不立刻買回
+    assert held[6] is True                                # 隔天條件仍成立可再進場
+    close = pd.DataFrame({"A": [100, 99, 92, 95, 96, 97, 98, 99, 100, 101], "B": [1.0] * 10}, index=idx, dtype=float)
+    w = strategies.select(score, keep, k=1, close=close, stop_loss=0.07)
+    assert (w["A"] > 0).tolist()[:3] == [True, True, False]  # 跌 8% 觸發停損
+
+
+def test_all_strategies_run():
+    from simtrade.data import to_wide
+    import json
+    cfg = json.loads((Path(__file__).resolve().parent.parent / "config.json").read_text(encoding="utf-8"))
+    syms = [f"S{i:03d}" for i in range(60)]
+    wide = to_wide(fake_long(syms, days=400))
+    wide["close"].iloc[300:303] *= 1.06  # 製造一次爆量長紅 / 突破
+    wide["high"].iloc[300:303] = wide["close"].iloc[300:303]
+    wide["volume"].iloc[300] *= 5
+    elig = strategies.eligibility(wide, 0)
+    defaults = {"max_positions": cfg["max_positions"], **cfg["exits"]}
+    for name, scfg in cfg["strategies"].items():
+        st = strategies.build(name, scfg, defaults)
+        w = st.target_weights(wide, elig)
+        assert (w.sum(axis=1) <= 1 + 1e-9).all(), name
+        assert ((w > 0).sum(axis=1) <= cfg["max_positions"]).all(), name
+        assert (w > 0).to_numpy().any(), f"{name} 從來沒有進場"
+
+
+def test_round_trip_and_limits():
+    c = Costs(fee_rate=0.001425, fee_discount=1, min_fee=20)
+    a = Account(cash=100_000, costs=c)
+    d = pd.Timestamp("2024-01-02")
+    a.buy(d, "2330.TW", 100, 500)                   # 50,000 + 71.25 手續費
+    assert a.shares["2330.TW"] == 100
+    assert abs(a.cash - (100_000 - 50_000 - 71.25)) < 1e-6
+    a.sell(d, "2330.TW", 100, 500, prev_close=560)  # 跌停附近 → 賣不掉
+    assert a.shares["2330.TW"] == 100
+    a.sell(d, "2330.TW", 100, 500, prev_close=500)
+    assert "2330.TW" not in a.shares
+    assert a.trades[-1]["pnl"] < 0                  # 平盤賣出，扣掉成本會小虧
+    a.buy(d, "X", 10_000, 500)                      # 錢不夠 → 自動減量
+    assert a.cash >= 0 and a.shares["X"] < 10_000
+
+
+def test_no_lookahead():
+    """next_open：第 t 天的訊號只能在 t+1 成交。"""
+    from simtrade.data import to_wide
+    wide = to_wide(fake_long(["A"], days=50))
+
+    class FlipOnDay10(strategies.Strategy):
+        def target_weights(self, wide, eligible):
+            close = wide["close"]
+            w = pd.DataFrame(0.0, index=close.index, columns=close.columns)
+            w.iloc[10:] = 1.0
+            return w
+
+    elig = wide["close"].notna()
+    r = engine.run(FlipOnDay10(), wide, elig, 100_000, Costs(fee_rate=0, min_fee=0, sell_tax_stock=0, price_limit=None))
+    assert r["trades"][0]["date"] == str(wide["close"].index[11].date())
+
+
+def test_full_pipeline(tmp=Path(__file__).resolve().parent / "_out"):
+    import json
+    import run as runner
+    cfg = json.loads((runner.ROOT / "config.json").read_text(encoding="utf-8"))
+    runner.DOCS = tmp  # 測試結果寫到 tests/_out，不碰正式的 docs/
+    for key, m in cfg["markets"].items():
+        syms = [m["benchmark"]] + [f"S{i:03d}" for i in range(150)]
+        names = {s: f"假股{s}" for s in syms}
+        out = runner.run_market(key, cfg, long=fake_long(syms, seed=len(key)), names=names)
+        for s in out["strategies"]:
+            if s["key"] != "benchmark":
+                assert len(s["positions"]) <= cfg["max_positions"]
+                # 成交量為 0 的股票（第 k 檔，k % 5 == 0）不能被買
+                for t in s["recent_trades"]:
+                    if t["side"] == "買" and t["symbol"].startswith("S"):
+                        assert (int(t["symbol"][1:]) + 1) % 5 != 0, t
+        assert len(out["strategies"]) == 1 + len(cfg["strategies"])
+        for s in out["strategies"]:
+            assert s["equity"][0] == 100 and s["cash"] >= 0
+            assert len(s["equity"]) == len(out["dates"])
+    runner.build_dashboard()
+    html = (tmp / "index.html").read_text(encoding="utf-8")
+    assert "/*__DATA__*/null" not in html
+
+
+if __name__ == "__main__":
+    for name, fn in list(globals().items()):
+        if name.startswith("test_"):
+            fn()
+            print("通過", name)

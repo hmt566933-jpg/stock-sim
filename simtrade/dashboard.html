@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>策略模擬倉</title>
+<style>
+  :root {
+    --surface-0: #f4f4f2; --surface-1: #fcfcfb; --border: #e3e2de;
+    --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #7a7974;
+    --grid: #ecebe7; --bench: #8a8984;
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+    --s5: #e87ba4; --s6: #008300; --s7: #6250d6; --s8: #e34948;
+    --up: #c62828; --down: #1b7f3a;  /* 台灣習慣：紅漲綠跌 */
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --surface-0: #111110; --surface-1: #1a1a19; --border: #2e2e2c;
+      --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e88;
+      --grid: #2a2a28; --bench: #b3b2ab;
+      --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+      --s5: #d55181; --s6: #0ca30c; --s7: #9085e9; --s8: #e66767;
+      --up: #ef6b6b; --down: #3fbf6a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--surface-0); color: var(--text-primary);
+         font: 15px/1.5 -apple-system, "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif; }
+  main { max-width: 960px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 20px; margin: 4px 0 2px; }
+  .sub { color: var(--text-secondary); font-size: 13px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 14px 0; }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .seg button { border: 0; background: var(--surface-1); color: var(--text-secondary); padding: 6px 12px;
+                font: inherit; font-size: 14px; cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--border); }
+  .seg button[aria-pressed="true"] { background: var(--text-primary); color: var(--surface-1); }
+  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+  .card h2 { font-size: 15px; margin: 0 0 8px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; }
+  .chip { border: 1px solid var(--border); background: var(--surface-1); color: var(--text-secondary); border-radius: 99px;
+          padding: 3px 10px; font: inherit; font-size: 13px; cursor: pointer; }
+  .chip[aria-pressed="false"] { opacity: .45; }
+  .chip.all { color: var(--text-primary); }
+  .key { display: inline-block; width: 14px; height: 0; border-top: 2px solid; vertical-align: middle; margin-right: 5px; }
+  .key.dash { border-top-style: dashed; }
+  #chart { position: relative; }
+  #chart svg { display: block; width: 100%; height: auto; touch-action: pan-y; }
+  .tip { position: absolute; pointer-events: none; background: var(--surface-1); border: 1px solid var(--border);
+         border-radius: 8px; padding: 8px 10px; font-size: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.12);
+         white-space: nowrap; display: none; z-index: 2; }
+  .tip b { display: block; margin-bottom: 4px; }
+  .tip div { display: flex; justify-content: space-between; gap: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+  th, td { padding: 7px 6px; text-align: right; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+  th { color: var(--text-muted); font-weight: 500; }
+  th:first-child, td:first-child { text-align: left; }
+  .scroll { overflow-x: auto; }
+  .pos { color: var(--up); } .neg { color: var(--down); }
+  .rank { color: var(--text-muted); margin-right: 4px; }
+  details { border-top: 1px solid var(--grid); padding: 10px 0; }
+  details:first-of-type { border-top: 0; }
+  summary { cursor: pointer; font-weight: 600; }
+  .muted { color: var(--text-muted); font-size: 13px; }
+  .pill { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 99px; border: 1px solid var(--border); margin: 2px 4px 2px 0; }
+  .note { font-size: 12px; color: var(--text-muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>策略模擬倉</h1>
+  <div class="sub" id="meta"></div>
+
+  <div class="row">
+    <div class="seg" id="mkt"></div>
+    <div class="seg" id="rng"></div>
+  </div>
+
+  <section class="card">
+    <h2>淨值走勢（區間起點 = 100）</h2>
+    <p class="note" style="margin:0 0 8px">點策略名稱可以顯示／隱藏線條</p>
+    <div class="legend" id="legend"></div>
+    <div id="chart"><div class="tip" id="tip"></div></div>
+  </section>
+
+  <section class="card">
+    <h2>策略排名</h2>
+    <div class="scroll"><table id="rank"></table></div>
+    <p class="note">「區間報酬」跟著上方時間範圍；其餘欄位為整個模擬期間。成本已含手續費與證交稅。</p>
+  </section>
+
+  <section class="card">
+    <h2>各策略持倉與下一個交易日動作</h2>
+    <p class="note" style="margin:0 0 6px" id="exitnote"></p>
+    <div id="detail"></div>
+  </section>
+
+  <p class="note">規則：每天掃描整個股票池（排除近 20 日平均成交金額過低的股票），依各策略條件排名選股；收盤後產生訊號，下一個交易日開盤價成交。價格為還原權息後價格。股票池為目前上市櫃／成分股，不含已下市股票，歷史績效可能偏高。本頁為模擬結果，非投資建議。</p>
+</main>
+
+<script>
+const DATA = /*__DATA__*/null;
+// 顏色跟著策略走（依 config 順序固定配色），不會因排名或篩選而改變
+const SLOT = {};
+Object.values(DATA).forEach(d => d.strategies.filter(s => s.key !== "benchmark")
+  .forEach(s => { if (!(s.key in SLOT)) SLOT[s.key] = Object.keys(SLOT).length % 8 + 1; }));
+const color = k => k === "benchmark" ? "var(--bench)" : `var(--s${SLOT[k] || 1})`;
+const RANGES = [["全部", null], ["1年", 365], ["6個月", 182], ["3個月", 91]];
+let state = { market: Object.keys(DATA)[0], range: null, shown: {} };
+// 預設只顯示總報酬前 3 名＋大盤，避免 9 條線擠在一起；點圖例可切換
+function defaultShown(d) {
+  const top = [...d.strategies].filter(s => s.key !== "benchmark")
+    .sort((a, b) => b.stats.total_return - a.stats.total_return).slice(0, 3).map(s => s.key);
+  return new Set(["benchmark", ...top]);
+}
+
+const $ = id => document.getElementById(id);
+const fmtPct = v => v == null ? "–" : `<span class="${v > 0 ? "pos" : v < 0 ? "neg" : ""}">${v > 0 ? "+" : ""}${v.toFixed(2)}%</span>`;
+const fmtNum = v => v == null ? "–" : Number(v).toLocaleString("zh-TW", { maximumFractionDigits: 2 });
+
+function seg(el, items, current, onPick) {
+  el.innerHTML = "";
+  for (const [label, val] of items) {
+    const b = document.createElement("button");
+    b.textContent = label; b.setAttribute("aria-pressed", String(val === current));
+    b.onclick = () => onPick(val); el.appendChild(b);
+  }
+}
+
+function sliceIdx(d) {
+  if (!state.range) return 0;
+  const last = new Date(d.dates[d.dates.length - 1]);
+  const from = new Date(last - state.range * 864e5);
+  const i = d.dates.findIndex(x => new Date(x) >= from);
+  return Math.max(0, i);
+}
+
+function render() {
+  const d = DATA[state.market];
+  $("meta").textContent = `${d.name}｜資料至 ${d.last_date}｜更新於 ${d.updated_at}（台北）｜股票池 ${fmtNum(d.universe_size)} 檔，今日可交易 ${fmtNum(d.eligible_today)} 檔｜每個策略最多持有 ${d.max_positions} 檔，起始資金 ${fmtNum(d.initial_cash)} ${d.currency}`;
+  seg($("mkt"), Object.keys(DATA).map(k => [DATA[k].name, k]), state.market, v => { state.market = v; render(); });
+  if (!state.shown[state.market]) state.shown[state.market] = defaultShown(d);
+  const shown = state.shown[state.market];
+  seg($("rng"), RANGES, state.range, v => { state.range = v; render(); });
+
+  const i0 = sliceIdx(d);
+  const dates = d.dates.slice(i0);
+  const series = d.strategies.map(s => {
+    const raw = s.equity.slice(i0), base = raw[0] || 1;
+    return { key: s.key, label: s.label, vals: raw.map(v => v / base * 100), s };
+  });
+
+  $("legend").innerHTML = series.map(s =>
+    `<button class="chip" data-k="${s.key}" aria-pressed="${shown.has(s.key)}"><i class="key ${s.key === "benchmark" ? "dash" : ""}" style="border-color:${color(s.key)}"></i>${s.label}</button>`).join("") +
+    `<button class="chip all" data-k="__all">${shown.size === series.length ? "只看前3名" : "全部顯示"}</button>`;
+  $("legend").querySelectorAll("button").forEach(b => b.onclick = () => {
+    const k = b.dataset.k;
+    if (k === "__all") state.shown[state.market] = shown.size === series.length ? defaultShown(d) : new Set(series.map(s => s.key));
+    else if (shown.has(k)) { if (shown.size > 1) shown.delete(k); } else shown.add(k);
+    render();
+  });
+  drawChart(dates, series.filter(s => shown.has(s.key)));
+  drawTable(series);
+  drawDetail(d);
+}
+
+function drawChart(dates, series) {
+  const box = $("chart");
+  const W = Math.max(320, box.clientWidth), H = Math.round(Math.min(380, Math.max(240, W * 0.55)));
+  const m = { t: 10, r: 92, b: 26, l: 40 };
+  const iw = W - m.l - m.r, ih = H - m.t - m.b, n = dates.length;
+  let lo = Infinity, hi = -Infinity;
+  series.forEach(s => s.vals.forEach(v => { if (v < lo) lo = v; if (v > hi) hi = v; }));
+  const pad = (hi - lo) * 0.06 || 5; lo -= pad; hi += pad;
+  const x = i => m.l + (n <= 1 ? 0 : i / (n - 1) * iw);
+  const y = v => m.t + (1 - (v - lo) / (hi - lo)) * ih;
+
+  const step = niceStep((hi - lo) / 5);
+  let grid = "";
+  for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) {
+    grid += `<line x1="${m.l}" x2="${m.l + iw}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)"/>
+             <text x="${m.l - 6}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="var(--text-muted)">${Math.round(v)}</text>`;
+  }
+  const ticks = 4;
+  for (let k = 0; k <= ticks; k++) {
+    const i = Math.round(k / ticks * (n - 1));
+    grid += `<text x="${x(i)}" y="${H - 6}" text-anchor="${k === 0 ? "start" : k === ticks ? "end" : "middle"}" font-size="11" fill="var(--text-muted)">${dates[i].slice(0, 7)}</text>`;
+  }
+
+  // 只畫最多 ~600 點，避免手機卡頓
+  const stride = Math.max(1, Math.floor(n / 600));
+  const ordered = [...series].sort((a, b) => (a.key === "benchmark") - (b.key === "benchmark")).reverse();
+  let lines = "";
+  for (const s of ordered) {
+    let dpath = "";
+    for (let i = 0; i < n; i += stride) dpath += (i ? "L" : "M") + x(i).toFixed(1) + "," + y(s.vals[i]).toFixed(1);
+    dpath += "L" + x(n - 1).toFixed(1) + "," + y(s.vals[n - 1]).toFixed(1);
+    lines += `<path d="${dpath}" fill="none" stroke="${color(s.key)}" stroke-width="2" stroke-linejoin="round"
+              ${s.key === "benchmark" ? 'stroke-dasharray="5 4"' : ""}/>`;
+  }
+
+  // 線尾直接標示（避免重疊：依 y 排序後最小間距 14px）
+  const ends = series.map(s => ({ s, y: y(s.vals[n - 1]) })).sort((a, b) => a.y - b.y);
+  for (let k = 1; k < ends.length; k++) if (ends[k].y - ends[k - 1].y < 14) ends[k].y = ends[k - 1].y + 14;
+  let labels = "";
+  for (const e of (series.length <= 5 ? ends : [])) {
+    const v = e.s.vals[n - 1];
+    labels += `<circle cx="${x(n - 1)}" cy="${y(v)}" r="3" fill="${color(e.s.key)}"/>
+      <text x="${x(n - 1) + 8}" y="${e.y + 4}" font-size="11" fill="var(--text-secondary)">${shortLabel(e.s.label)} ${Math.round(v)}</text>`;
+  }
+
+  box.querySelector("svg")?.remove();
+  box.insertAdjacentHTML("afterbegin",
+    `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="各策略淨值走勢">
+      ${grid}${lines}${labels}
+      <line id="cross" y1="${m.t}" y2="${m.t + ih}" stroke="var(--text-muted)" stroke-width="1" visibility="hidden"/>
+      <g id="dots"></g>
+      <rect x="${m.l}" y="0" width="${iw}" height="${H}" fill="transparent" id="hit"/>
+    </svg>`);
+
+  const svg = box.querySelector("svg"), tip = $("tip");
+  const move = ev => {
+    const r = svg.getBoundingClientRect();
+    const px = ((ev.touches ? ev.touches[0].clientX : ev.clientX) - r.left) * (W / r.width);
+    const i = Math.min(n - 1, Math.max(0, Math.round((px - m.l) / iw * (n - 1))));
+    const cx = x(i);
+    const cross = svg.querySelector("#cross");
+    cross.setAttribute("x1", cx); cross.setAttribute("x2", cx); cross.setAttribute("visibility", "visible");
+    svg.querySelector("#dots").innerHTML = series.map(s =>
+      `<circle cx="${cx}" cy="${y(s.vals[i])}" r="4" fill="${color(s.key)}" stroke="var(--surface-1)" stroke-width="2"/>`).join("");
+    const rows = [...series].sort((a, b) => b.vals[i] - a.vals[i]).map(s =>
+      `<div><span><i class="key ${s.key === "benchmark" ? "dash" : ""}" style="border-color:${color(s.key)}"></i>${s.label}</span><span>${s.vals[i].toFixed(1)}</span></div>`).join("");
+    tip.innerHTML = `<b>${dates[i]}</b>${rows}`;
+    tip.style.display = "block";
+    const left = cx / W * r.width;
+    tip.style.left = (left > r.width / 2 ? left - tip.offsetWidth - 12 : left + 12) + "px";
+    tip.style.top = "8px";
+  };
+  const leave = () => { tip.style.display = "none"; svg.querySelector("#cross").setAttribute("visibility", "hidden"); svg.querySelector("#dots").innerHTML = ""; };
+  const hit = svg.querySelector("#hit");
+  hit.addEventListener("mousemove", move); hit.addEventListener("mouseleave", leave);
+  hit.addEventListener("touchstart", move, { passive: true }); hit.addEventListener("touchmove", move, { passive: true });
+  hit.addEventListener("touchend", () => setTimeout(leave, 1500));
+}
+
+function stock(sym) {
+  const nm = (DATA[state.market].names || {})[sym] || "";
+  const code = sym.replace(/\.TWO?$/, "");
+  return nm && nm !== sym ? `${code} ${nm}` : code;
+}
+function shortLabel(s) { return s.replace(/（.*?）/g, "").split(" ")[0]; }
+function niceStep(raw) { const p = Math.pow(10, Math.floor(Math.log10(raw))); const f = raw / p; return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p; }
+
+function drawTable(series) {
+  const rows = series.map(s => ({ ...s, rr: s.vals[s.vals.length - 1] - 100 }))
+    .sort((a, b) => b.s.stats.total_return - a.s.stats.total_return);
+  $("rank").innerHTML = `<tr><th>策略</th><th>總報酬</th><th>區間報酬</th><th>年化</th><th>最大回撤</th><th>Sharpe</th><th>交易</th><th>勝率</th><th>成本</th></tr>` +
+    rows.map((r, k) => {
+      const st = r.s.stats;
+      return `<tr><td><span class="rank">${k + 1}</span><i class="key ${r.key === "benchmark" ? "dash" : ""}" style="border-color:${color(r.key)}"></i>${r.label}</td>
+        <td>${fmtPct(st.total_return)}</td><td>${fmtPct(r.rr)}</td><td>${fmtPct(st.cagr)}</td>
+        <td>${st.max_drawdown.toFixed(1)}%</td><td>${st.sharpe.toFixed(2)}</td><td>${st.trades}</td>
+        <td>${st.win_rate == null ? "–" : st.win_rate + "%"}</td><td>${fmtNum(st.fees)}</td></tr>`;
+    }).join("");
+}
+
+function drawDetail(d) {
+  const ex = d.exits || {};
+  $("exitnote").textContent = [ex.max_hold_days && `最多持有 ${ex.max_hold_days} 個交易日`,
+    ex.stop_loss && `停損 ${Math.round(ex.stop_loss * 100)}%`, ex.take_profit && `停利 ${Math.round(ex.take_profit * 100)}%`]
+    .filter(Boolean).join("、") + (ex.max_hold_days ? "（週動能輪動為每週換股）" : "");
+  $("detail").innerHTML = d.strategies.map(s => {
+    const pend = s.pending.length ? s.pending.map(p => `<span class="pill">${p.action} ${stock(p.symbol)}</span>`).join("") : '<span class="muted">不動作</span>';
+    const pos = s.positions.length ? `<div class="scroll"><table><tr><th>股票</th><th>股數</th><th>均價</th><th>現價</th><th>市值</th><th>損益</th></tr>` +
+      s.positions.map(p => `<tr><td>${stock(p.symbol)}</td><td>${fmtNum(p.qty)}</td><td>${fmtNum(p.avg_cost)}</td><td>${fmtNum(p.price)}</td><td>${fmtNum(p.value)}</td><td>${fmtPct(p.pnl_pct)}</td></tr>`).join("") +
+      `</table></div>` : '<p class="muted">目前空手</p>';
+    const tr = s.recent_trades.length ? `<div class="scroll"><table><tr><th>日期</th><th>股票</th><th>買賣</th><th>股數</th><th>價格</th><th>已實現損益</th></tr>` +
+      s.recent_trades.map(t => `<tr><td>${t.date}</td><td>${stock(t.symbol)}</td><td>${t.side}</td><td>${fmtNum(t.qty)}</td><td>${fmtNum(t.price)}</td><td>${t.pnl == null ? "–" : fmtNum(t.pnl)}</td></tr>`).join("") +
+      `</table></div>` : "";
+    return `<details><summary><i class="key ${s.key === "benchmark" ? "dash" : ""}" style="border-color:${color(s.key)}"></i>${s.label}</summary>
+      <p>下一個交易日：${pend}</p>
+      <p class="muted">現金 ${fmtNum(s.cash)} ${d.currency}</p>${pos}
+      ${tr ? '<p class="muted" style="margin-top:12px">最近交易</p>' + tr : ""}</details>`;
+  }).join("");
+}
+
+window.addEventListener("resize", () => { clearTimeout(window._rt); window._rt = setTimeout(render, 150); });
+render();
+</script>
+</body>
+</html>

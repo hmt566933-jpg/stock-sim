@@ -1,0 +1,63 @@
+name: 每日模擬更新
+
+on:
+  schedule:
+    - cron: "17 7 * * 1-5"    # 台股：台北時間 15:17（收盤 13:30 後）
+    - cron: "23 22 * * 1-5"   # 美股：台北時間隔天 06:23（美東收盤後）
+  workflow_dispatch:          # 也可以在 GitHub 上手動按「Run workflow」
+    inputs:
+      market:
+        description: "tw / us / all"
+        default: "all"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-sim
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # 歷史股價很大，不放進 git，用 GitHub 的快取保存，每天只補抓新資料
+      - name: 還原資料快取
+        uses: actions/cache@v4
+        with:
+          path: data
+          key: simdata-${{ github.run_id }}
+          restore-keys: simdata-
+
+      - name: 決定要跑哪個市場
+        id: pick
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "market=${{ github.event.inputs.market }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "17 7 * * 1-5" ]; then
+            echo "market=tw" >> "$GITHUB_OUTPUT"
+          else
+            echo "market=us" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 跑模擬
+        run: python run.py --market ${{ steps.pick.outputs.market }}
+
+      - name: 存回結果
+        run: |
+          git config user.name "sim-bot"
+          git config user.email "sim-bot@users.noreply.github.com"
+          git add docs
+          git diff --cached --quiet || git commit -m "每日更新 ${{ steps.pick.outputs.market }} $(TZ=Asia/Taipei date +%F)"
+          git pull --rebase
+          git push

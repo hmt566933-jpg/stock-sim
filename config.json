@@ -1,0 +1,60 @@
+{
+  "markets": {
+    "tw": {
+      "name": "台股",
+      "currency": "TWD",
+      "initial_cash": 1000000,
+      "start_date": "2020-01-01",
+      "benchmark": "0050.TW",
+      "universe": {
+        "source": "twse_tpex",
+        "min_turnover": 50000000,
+        "fallback_symbols": ["0050.TW", "2330.TW", "2317.TW", "2454.TW", "2881.TW", "2412.TW", "0056.TW", "2308.TW"]
+      },
+      "etfs_prefix": "00",
+      "costs": {
+        "fee_rate": 0.001425,
+        "fee_discount": 0.6,
+        "min_fee": 20,
+        "sell_tax_stock": 0.003,
+        "sell_tax_etf": 0.001,
+        "price_limit": 0.10
+      }
+    },
+    "us": {
+      "name": "美股",
+      "currency": "USD",
+      "initial_cash": 100000,
+      "start_date": "2020-01-01",
+      "benchmark": "SPY",
+      "universe": {
+        "source": "sp500",
+        "min_turnover": 20000000,
+        "fallback_symbols": ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META"]
+      },
+      "etfs_prefix": null,
+      "costs": {
+        "fee_rate": 0.0,
+        "fee_discount": 1.0,
+        "min_fee": 0,
+        "sell_tax_stock": 0.0000278,
+        "sell_tax_etf": 0.0000278,
+        "price_limit": null
+      }
+    }
+  },
+  "execution": "next_open",
+  "rebalance_band": 0.02,
+  "max_positions": 10,
+  "exits": {"max_hold_days": 5, "stop_loss": 0.07, "take_profit": null},
+  "strategies": {
+    "ma_cross":     {"label": "均線黃金交叉 5/20", "fast": 5, "slow": 20},
+    "rsi2":         {"label": "RSI(2) 超賣反彈", "period": 2, "buy_below": 10, "trend": 200, "exit_ma": 5},
+    "breakout":     {"label": "20日新高突破", "lookback": 20, "min_vol_ratio": 1.5},
+    "bollinger":    {"label": "布林下軌反彈", "period": 20, "width": 2.0},
+    "volume_surge": {"label": "爆量長紅", "min_gain": 0.04, "min_vol_ratio": 2.0, "near_high": 0.01},
+    "kd_cross":     {"label": "KD 低檔黃金交叉", "period": 9, "low": 30, "high": 80},
+    "pullback":     {"label": "多頭連3跌反彈", "down_days": 3, "trend": 60},
+    "momentum":     {"label": "週動能輪動", "lookback": 20, "freq": "W"}
+  }
+}
