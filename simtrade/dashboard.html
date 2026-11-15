@@ -92,7 +92,6 @@
 
   <div class="row">
     <div class="seg" id="mkt"></div>
-    <div class="seg" id="rng"></div>
   </div>
 
   <section class="card" id="wcard">
@@ -124,6 +123,7 @@
 
   <section class="card">
     <h2>淨值走勢（區間起點 = 100）</h2>
+    <div class="seg" id="rng" style="margin:0 0 8px"></div>
     <p class="note" style="margin:0 0 8px">點策略名稱可以顯示／隱藏線條</p>
     <div class="legend" id="legend"></div>
     <div id="chart"><div class="tip" id="tip"></div></div>
@@ -315,7 +315,7 @@ function drawWeekly(d) {
   $("wnext").onclick = () => { state.week = wi + 1; render(); };
 
   // 該週損益長條圖（依報酬排序）
-  const rows = d.strategies.map(s => ({ s, v: s.weekly[wi] })).sort((a, b) => b.v.ret - a.v.ret);
+  const rows = d.strategies.map(s => ({ s, v: s.weekly[wi] }));  // 固定順序，不隨每週排名跳動
   const maxAbs = Math.max(0.5, ...rows.map(r => Math.abs(r.v.ret)));
   $("wbars").innerHTML = rows.map(({ s, v }) => {
     const half = Math.abs(v.ret) / maxAbs * 50;
@@ -341,7 +341,7 @@ function drawWeekly(d) {
     const f = s.forecast.next, eqNow = s.equity[s.equity.length - 1] / 100 * d.initial_cash;
     return { s, ...f, money: eqNow * f.med / 100, acc: s.forecast.accuracy,
              buys: s.pending.filter(p => p.action === "買進"), sells: s.pending.filter(p => p.action === "賣出") };
-  }).sort((a, b) => b.med - a.med);
+  });
   const lastDone = [...weeks].reverse().find(w => w.done) || weeks[last];
   const nextMon = new Date(new Date(lastDone.start).getTime() + 7 * 864e5).toISOString().slice(0, 10);
   $("wfhead").textContent = `下週展望（${md(nextMon)} 起）`;
