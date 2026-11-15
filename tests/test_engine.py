@@ -145,6 +145,17 @@ def test_outlook_follow_picks_best():
     assert log[-1]["key"] == "a" and w["X"].iloc[-10:].gt(0).all() and (w["Y"] == 0).all()
 
 
+def test_resize_keeps_total_and_cap():
+    idx = pd.bdate_range("2024-01-01", periods=3)
+    w = pd.DataFrame([[0.1, 0.1, 0.1, 0], [0.1, 0.1, 0, 0], [0.1, 0, 0, 0]], index=idx, columns=list("ABCD"))
+    sc = pd.DataFrame([[1, 1, 10, 5], [3, 1, 1, 1], [np.nan] * 4], index=idx, columns=list("ABCD"), dtype=float)
+    r = strategies.resize(w, sc, 10)
+    assert np.allclose(r.sum(axis=1), w.sum(axis=1))      # 總投入不變
+    assert (r.max(axis=1) <= 0.2 + 1e-9).all()             # 單檔最多 2 倍
+    assert r.loc[idx[0], "C"] == 0.2 and r.loc[idx[0], "D"] == 0  # 沒持有的不會被分到
+    assert r.loc[idx[2], "A"] == 0.1                        # 沒分數時維持平均
+
+
 def test_round_trip_and_limits():
     c = Costs(fee_rate=0.001425, fee_discount=1, min_fee=20)
     a = Account(cash=100_000, costs=c)

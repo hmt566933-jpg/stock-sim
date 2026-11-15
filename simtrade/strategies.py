@@ -61,6 +61,37 @@ def select(entry_score: pd.DataFrame, keep: pd.DataFrame, k: int, close: pd.Data
     return pd.DataFrame(w, index=entry_score.index, columns=entry_score.columns)
 
 
+# ───────────────────────── 資金分配 ─────────────────────────
+
+def resize(w: pd.DataFrame, score: pd.DataFrame, k: int, cap: float = 2.0) -> pd.DataFrame:
+    """把每天「持有的股票」按 score 比例重新分配資金（總投入比例不變）。
+    單檔最多 cap / k（預設 2 倍平均），超出的部分分給其他檔。score 缺值時用平均。"""
+    held = w > 0
+    total = w.sum(axis=1)
+    sc = score.reindex_like(w).where(held)
+    sc = sc.where(sc > 0)
+    sc = sc.fillna(sc.mean(axis=1).to_frame().to_numpy() * held.astype(float)).where(held)
+    out = sc.div(sc.sum(axis=1), axis=0).mul(total, axis=0).fillna(0.0)
+    hi = cap / k
+    for _ in range(3):  # 封頂後把多出來的資金按比例分給沒封頂的
+        over = (out - hi).clip(lower=0)
+        if over.to_numpy().sum() < 1e-12:
+            break
+        out = out.clip(upper=hi)
+        room = (out < hi - 1e-12) & held
+        share = out.where(room, 0)
+        out = out + share.div(share.sum(axis=1).replace(0, np.nan), axis=0).mul(over.sum(axis=1), axis=0).fillna(0)
+    out = out.where(held, 0.0)
+    no_score = ~(sc.sum(axis=1) > 0)          # 整列都沒有分數時維持平均分配
+    out.loc[no_score] = w.loc[no_score]
+    return out
+
+
+def inv_vol(close: pd.DataFrame, n: int = 20) -> pd.DataFrame:
+    """波動度倒數：近 n 日日報酬標準差越小，分數越高。"""
+    return 1 / close.pct_change().rolling(n, min_periods=n).std().replace(0, np.nan)
+
+
 # ───────────────────────── 指標 ─────────────────────────
 
 def sma(df, n):
@@ -98,12 +129,14 @@ class Strategy:
 
     def __init__(self, label: str = "", max_positions: int = 10, max_hold_days: int | None = None,
                  stop_loss: float | None = None, take_profit: float | None = None,
-                 market_filter: dict | None = None, entry_dip: float | None = None, **params):
+                 market_filter: dict | None = None, entry_dip: float | None = None,
+                 sizing: str = "equal", **params):
         self.label = label or self.__class__.__name__
         self.k = max_positions
         self.max_hold, self.stop_loss, self.take_profit = max_hold_days, stop_loss, take_profit
         self.market_filter = market_filter  # {"symbol": "0050.TW", "ma": 20} 或 None（不使用）
         self.entry_dip = entry_dip          # 限價進場：比前一天收盤低多少才買（0.02 = 2%），None = 開盤直接買
+        self.sizing = sizing                # 資金分配："equal" 平均、"vol" 依波動度、"signal" 依訊號強弱（週動能類）
         self.params = params
 
     def p(self, name, default):
@@ -119,7 +152,10 @@ class Strategy:
 
     def pick(self, entry, keep, close):
         entry = entry.where(self.market_ok(close), axis=0)  # 大盤弱勢時不開新倉（已持有的照原規則出場）
-        return select(entry, keep, self.k, close, self.max_hold, self.stop_loss, self.take_profit)
+        w = select(entry, keep, self.k, close, self.max_hold, self.stop_loss, self.take_profit)
+        if self.sizing == "vol":
+            w = resize(w, inv_vol(close), self.k)
+        return w
 
     def target_weights(self, wide: dict, eligible: pd.DataFrame) -> pd.DataFrame:
         raise NotImplementedError
@@ -243,7 +279,12 @@ class Momentum(Strategy):
                 picks = r[r > 0].nlargest(self.k).index
                 row[picks] = 1.0 / self.k
             w.loc[dt] = row
-        return w.ffill().fillna(0.0)
+        w = w.ffill().fillna(0.0)
+        if self.sizing == "signal":   # 漲越多分越多
+            w = resize(w, (c / c.shift(self.p("lookback", 20)) - 1), self.k)
+        elif self.sizing == "vol":    # 波動越小分越多
+            w = resize(w, inv_vol(c), self.k)
+        return w
 
 
 class Fixed(Strategy):

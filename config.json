@@ -68,6 +68,8 @@
     "momentum":     {"label": "週動能輪動", "lookback": 20, "freq": "W"},
     "momentum_10":  {"type": "momentum", "label": "週動能 10日", "lookback": 10, "freq": "W"},
     "momentum_60":  {"type": "momentum", "label": "週動能 60日", "lookback": 60, "freq": "W"},
+    "momentum_sig": {"type": "momentum", "label": "週動能・訊號加權", "lookback": 20, "freq": "W", "sizing": "signal"},
+    "momentum_vol": {"type": "momentum", "label": "週動能・波動加權", "lookback": 20, "freq": "W", "sizing": "vol"},
     "momentum_raw": {"type": "momentum", "label": "週動能（無濾網）", "lookback": 20, "freq": "W", "market_filter": false}
   }
 }
