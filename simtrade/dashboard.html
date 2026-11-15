@@ -65,6 +65,24 @@
   .muted { color: var(--text-muted); font-size: 13px; }
   .pill { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 99px; border: 1px solid var(--border); margin: 2px 4px 2px 0; }
   .note { font-size: 12px; color: var(--text-muted); }
+  .wnav { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
+  .wnav button { border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary);
+                 border-radius: 8px; width: 34px; height: 30px; font-size: 16px; cursor: pointer; }
+  .wnav button:disabled { opacity: .35; cursor: default; }
+  .wnav b { font-size: 15px; }
+  .bars { display: grid; grid-template-columns: minmax(6.5em, 32%) 1fr auto; gap: 6px 8px; align-items: center; font-size: 13px; }
+  .bars .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; line-height: 1.25; }
+  .bars .num small { display: block; color: var(--text-muted); font-size: 11px; }
+  .bars .lbl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .track { position: relative; height: 26px; }
+  .track .zero { position: absolute; left: 50%; top: 0; bottom: 0; border-left: 1px solid var(--text-muted); }
+  .track .bar { position: absolute; top: 5px; height: 16px; border-radius: 4px; }
+  h3 { font-size: 14px; margin: 18px 0 8px; }
+  .heat td { text-align: center; min-width: 58px; }
+  .heat th.wk { cursor: pointer; }
+  .heat th.wk.sel { color: var(--text-primary); text-decoration: underline; }
+  .heat td.sel { outline: 2px solid var(--text-primary); outline-offset: -2px; }
+
 </style>
 </head>
 <body>
@@ -76,6 +94,27 @@
     <div class="seg" id="mkt"></div>
     <div class="seg" id="rng"></div>
   </div>
+
+  <section class="card" id="wcard">
+    <h2>每週損益比較</h2>
+    <div class="wnav"><button id="wprev" aria-label="上一週">‹</button><b id="wlabel"></b><button id="wnext" aria-label="下一週">›</button></div>
+    <div class="bars" id="wbars"></div>
+    <p class="note">損益＝該週淨值變化（含持股未實現損益，已扣手續費與稅）。每個策略起始資金相同。</p>
+    <div id="wtrades"></div>
+
+    <h3>下週展望</h3>
+    <p class="note" style="margin:0 0 8px">根據各策略過去 52 週的週報酬分布估計，不是保證。股價無法準確預測，請當作「這個策略通常會怎樣」的參考。</p>
+    <div class="scroll"><table id="wfcst"></table></div>
+    <div id="wplan"></div>
+
+    <h3>近幾週統計</h3>
+    <div class="seg" id="wn" style="margin-bottom:8px"></div>
+    <div class="scroll"><table id="wstats"></table></div>
+
+    <h3>逐週損益（%）</h3>
+    <div class="scroll"><table class="heat" id="wheat"></table></div>
+    <p class="note">點週次可切換上方的週損益圖。</p>
+  </section>
 
   <section class="card">
     <h2>淨值走勢（區間起點 = 100）</h2>
@@ -106,8 +145,8 @@ const SLOT = {};
 Object.values(DATA).forEach(d => d.strategies.filter(s => s.key !== "benchmark")
   .forEach(s => { if (!(s.key in SLOT)) SLOT[s.key] = Object.keys(SLOT).length % 8 + 1; }));
 const color = k => k === "benchmark" ? "var(--bench)" : `var(--s${SLOT[k] || 1})`;
-const RANGES = [["全部", null], ["1年", 365], ["6個月", 182], ["3個月", 91]];
-let state = { market: Object.keys(DATA)[0], range: null, shown: {} };
+const RANGES = [["全部", null], ["1年", 365], ["3個月", 91], ["1個月", 31], ["1週", 7]];
+let state = { market: Object.keys(DATA)[0], range: null, shown: {}, week: null, wn: 12 };
 // 預設只顯示總報酬前 3 名＋大盤，避免 9 條線擠在一起；點圖例可切換
 function defaultShown(d) {
   const top = [...d.strategies].filter(s => s.key !== "benchmark")
@@ -139,7 +178,8 @@ function sliceIdx(d) {
 function render() {
   const d = DATA[state.market];
   $("meta").textContent = `${d.name}｜資料至 ${d.last_date}｜更新於 ${d.updated_at}（台北）｜股票池 ${fmtNum(d.universe_size)} 檔，今日可交易 ${fmtNum(d.eligible_today)} 檔｜每個策略最多持有 ${d.max_positions} 檔，起始資金 ${fmtNum(d.initial_cash)} ${d.currency}`;
-  seg($("mkt"), Object.keys(DATA).map(k => [DATA[k].name, k]), state.market, v => { state.market = v; render(); });
+  seg($("mkt"), Object.keys(DATA).map(k => [DATA[k].name, k]), state.market, v => { state.market = v; state.week = null; render(); });
+  drawWeekly(d);
   if (!state.shown[state.market]) state.shown[state.market] = defaultShown(d);
   const shown = state.shown[state.market];
   seg($("rng"), RANGES, state.range, v => { state.range = v; render(); });
@@ -251,6 +291,92 @@ function stock(sym) {
 }
 function shortLabel(s) { return s.replace(/（.*?）/g, "").split(" ")[0]; }
 function niceStep(raw) { const p = Math.pow(10, Math.floor(Math.log10(raw))); const f = raw / p; return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p; }
+
+const md = s => s.slice(5).replace("-", "/");
+const fmtMoney = v => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(Math.round(v)).toLocaleString("zh-TW");
+
+function drawWeekly(d) {
+  const weeks = d.weeks || [];
+  const ok = weeks.length && d.strategies.every(s => s.weekly);
+  $("wcard").style.display = ok ? "" : "none";  // 舊資料還沒有週損益時先隱藏
+  if (!ok) return;
+  const last = weeks.length - 1;
+  const wi = state.week == null ? last : Math.min(state.week, last);
+  const w = weeks[wi];
+  $("wlabel").textContent = `${md(w.start)} – ${md(w.end)}` + (wi === last ? (w.done ? "（最近一週）" : "（本週進行中）") : "");
+  $("wprev").disabled = wi === 0; $("wnext").disabled = wi === last;
+  $("wprev").onclick = () => { state.week = wi - 1; render(); };
+  $("wnext").onclick = () => { state.week = wi + 1; render(); };
+
+  // 該週損益長條圖（依報酬排序）
+  const rows = d.strategies.map(s => ({ s, v: s.weekly[wi] })).sort((a, b) => b.v.ret - a.v.ret);
+  const maxAbs = Math.max(0.5, ...rows.map(r => Math.abs(r.v.ret)));
+  $("wbars").innerHTML = rows.map(({ s, v }) => {
+    const half = Math.abs(v.ret) / maxAbs * 50;
+    const up = v.ret >= 0;
+    const bar = up ? `left:50%;width:${half}%` : `left:${50 - half}%;width:${half}%`;
+    return `<div class="lbl"><i class="key ${s.key === "benchmark" ? "dash" : ""}" style="border-color:${color(s.key)}"></i>${s.label}</div>
+      <div class="track"><div class="zero"></div>
+        <div class="bar" style="${bar};background:var(${up ? "--up" : "--down"})"></div></div>
+      <div class="num"><span class="${up ? "pos" : "neg"}">${v.ret > 0 ? "+" : ""}${v.ret.toFixed(2)}%</span><small>${fmtMoney(v.pnl)}</small></div>`;
+  }).join("");
+
+  // 最近一週的交易明細
+  if (wi === last) {
+    $("wtrades").innerHTML = d.strategies.filter(s => s.week_trades && s.week_trades.length).map(s =>
+      `<details><summary>${s.label}：本週 ${s.week_trades.length} 筆交易</summary><div class="scroll"><table>
+        <tr><th>日期</th><th>股票</th><th>買賣</th><th>股數</th><th>價格</th><th>已實現損益</th></tr>` +
+      s.week_trades.map(t => `<tr><td>${md(t.date)}</td><td>${stock(t.symbol)}</td><td>${t.side}</td><td>${fmtNum(t.qty)}</td><td>${fmtNum(t.price)}</td><td>${t.pnl == null ? "–" : fmtMoney(t.pnl)}</td></tr>`).join("") +
+      `</table></div></details>`).join("");
+  } else $("wtrades").innerHTML = "";
+
+  // 下週展望：用過去 52 週的週報酬分布
+  const q = (arr, p) => { const a = [...arr].sort((x, y) => x - y); const i = (a.length - 1) * p, lo = Math.floor(i);
+    return a[lo] + (a[Math.ceil(i)] - a[lo]) * (i - lo); };
+  const fc = d.strategies.map(s => {
+    const rets = s.weekly.map(x => x.ret), eqNow = s.equity[s.equity.length - 1] / 100 * d.initial_cash;
+    const med = q(rets, 0.5);
+    return { s, up: rets.filter(r => r > 0).length / rets.length * 100, med, lo: q(rets, 0.1), hi: q(rets, 0.9),
+             money: eqNow * med / 100, buys: s.pending.filter(p => p.action === "買進"), sells: s.pending.filter(p => p.action === "賣出") };
+  }).sort((a, b) => b.med - a.med);
+  $("wfcst").innerHTML = `<tr><th>策略</th><th>上漲機率</th><th>中位數</th><th>預估損益</th><th>常見範圍</th><th>週一動作</th></tr>` +
+    fc.map(r => `<tr><td><i class="key ${r.s.key === "benchmark" ? "dash" : ""}" style="border-color:${color(r.s.key)}"></i>${r.s.label}</td>
+      <td>${r.up.toFixed(0)}%</td><td>${fmtPct(r.med)}</td><td><span class="${r.money > 0 ? "pos" : r.money < 0 ? "neg" : ""}">${fmtMoney(r.money)}</span></td>
+      <td>${r.lo.toFixed(1)}% ~ ${r.hi > 0 ? "+" : ""}${r.hi.toFixed(1)}%</td>
+      <td>${r.buys.length || r.sells.length ? `買 ${r.buys.length}／賣 ${r.sells.length}` : "不動"}</td></tr>`).join("");
+  $("wplan").innerHTML = fc.filter(r => r.buys.length || r.sells.length).map(r =>
+    `<details><summary>${r.s.label}：下個交易日 買 ${r.buys.length} 檔、賣 ${r.sells.length} 檔</summary>
+      <p>${r.buys.map(p => `<span class="pill">買 ${stock(p.symbol)}</span>`).join("")}${r.sells.map(p => `<span class="pill">賣 ${stock(p.symbol)}</span>`).join("")}</p></details>`).join("") +
+    `<p class="note">「常見範圍」＝過去 80% 的週落在這個區間；「預估損益」＝目前資金 × 中位數週報酬。週一動作是依最新收盤訊號，週一開盤執行。</p>`;
+
+  // 近 N 週統計
+  seg($("wn"), [["4週", 4], ["12週", 12], ["26週", 26], ["52週", 52]], state.wn, v => { state.wn = v; render(); });
+  const n = Math.min(state.wn, weeks.length), from = weeks.length - n;
+  const bench = d.strategies.find(s => s.key === "benchmark");
+  const stats = d.strategies.map(s => {
+    const ws = s.weekly.slice(from);
+    const rets = ws.map(x => x.ret);
+    const beat = bench && s !== bench ? ws.filter((x, i) => x.ret > bench.weekly[from + i].ret).length : null;
+    return { s, avg: rets.reduce((a, b) => a + b, 0) / n, win: rets.filter(r => r > 0).length / n * 100,
+             beat: beat == null ? null : beat / n * 100, best: Math.max(...rets), worst: Math.min(...rets),
+             sum: ws.reduce((a, x) => a + x.pnl, 0) };
+  }).sort((a, b) => b.sum - a.sum);
+  $("wstats").innerHTML = `<tr><th>策略</th><th>累計損益</th><th>平均週報酬</th><th>賺錢週</th><th>贏大盤週</th><th>最好週</th><th>最差週</th></tr>` +
+    stats.map((r, k) => `<tr><td><span class="rank">${k + 1}</span><i class="key ${r.s.key === "benchmark" ? "dash" : ""}" style="border-color:${color(r.s.key)}"></i>${r.s.label}</td>
+      <td><span class="${r.sum > 0 ? "pos" : r.sum < 0 ? "neg" : ""}">${fmtMoney(r.sum)}</span></td><td>${fmtPct(r.avg)}</td>
+      <td>${r.win.toFixed(0)}%</td><td>${r.beat == null ? "–" : r.beat.toFixed(0) + "%"}</td>
+      <td>${fmtPct(r.best)}</td><td>${fmtPct(r.worst)}</td></tr>`).join("");
+
+  // 逐週熱度表（最近的週在左邊）
+  const cols = [];
+  for (let i = last; i >= Math.max(0, weeks.length - Math.max(n, 4)); i--) cols.push(i);
+  const scale = Math.max(1, ...d.strategies.flatMap(s => cols.map(i => Math.abs(s.weekly[i].ret))));
+  $("wheat").innerHTML = `<tr><th>策略</th>${cols.map(i => `<th class="wk ${i === wi ? "sel" : ""}" data-i="${i}">${md(weeks[i].start)}</th>`).join("")}</tr>` +
+    d.strategies.map(s => `<tr><td><i class="key ${s.key === "benchmark" ? "dash" : ""}" style="border-color:${color(s.key)}"></i>${s.label}</td>` +
+      cols.map(i => { const v = s.weekly[i].ret, a = Math.round(Math.min(1, Math.abs(v) / scale) * 55);
+        return `<td class="${i === wi ? "sel" : ""}" style="background:color-mix(in srgb, var(${v >= 0 ? "--up" : "--down"}) ${a}%, transparent)">${v > 0 ? "+" : ""}${v.toFixed(1)}</td>`; }).join("") + "</tr>").join("");
+  $("wheat").querySelectorAll("th.wk").forEach(th => th.onclick = () => { state.week = +th.dataset.i; render(); });
+}
 
 function drawTable(series) {
   const rows = series.map(s => ({ ...s, rr: s.vals[s.vals.length - 1] - 100 }))

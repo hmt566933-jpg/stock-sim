@@ -51,7 +51,10 @@ def run_market(key: str, cfg: dict, offline: bool = False, long: pd.DataFrame | 
                        execution=cfg.get("execution", "next_open"),
                        band=cfg.get("rebalance_band", 0.02))
         eq = r["equity"]
+        weeks, wrows = weekly(eq, m["initial_cash"])
+        week_trades = [t for t in r["trades"] if weeks and t["date"] >= weeks[-1]["start"]]
         results.append(dict(
+            weekly=wrows, week_trades=week_trades[::-1],
             key=name, label=strat.label, stats=metrics.summarize(eq, r["trades"]),
             equity=[round(v / m["initial_cash"] * 100, 2) for v in eq],  # 起始 = 100
             positions=r["positions"], cash=r["cash"],
@@ -65,7 +68,7 @@ def run_market(key: str, cfg: dict, offline: bool = False, long: pd.DataFrame | 
         updated_at=datetime.now(TPE).strftime("%Y-%m-%d %H:%M"),
         dates=[str(d.date()) for d in wide["close"].index],
         universe_size=int(wide["close"].shape[1]), eligible_today=int(elig.iloc[-1].sum()),
-        max_positions=k, exits=cfg.get("exits", {}), strategies=results,
+        weeks=weeks, max_positions=k, exits=cfg.get("exits", {}), strategies=results,
         names={s: names.get(s, "") for s in _used_symbols(results)},
     )
     (DOCS / "data").mkdir(parents=True, exist_ok=True)
@@ -75,12 +78,27 @@ def run_market(key: str, cfg: dict, offline: bool = False, long: pd.DataFrame | 
     return out
 
 
+def weekly(eq: pd.Series, initial: float, n: int = 52) -> tuple[list[dict], list[dict]]:
+    """把每日淨值切成「週一到週五」，算每週損益金額與報酬率（最近 n 週）。"""
+    groups = eq.groupby(eq.index.to_period("W-FRI"))
+    weeks, rows, prev = [], [], initial
+    for _, g in groups:
+        last = float(g.iloc[-1])
+        weeks.append(dict(start=str(g.index[0].date()), end=str(g.index[-1].date()), done=True))
+        rows.append(dict(pnl=round(last - prev, 2), ret=round((last / prev - 1) * 100, 2) if prev else 0.0))
+        prev = last
+    if weeks:  # 最後一週如果還沒到週五，標示為進行中
+        weeks[-1]["done"] = eq.index[-1].dayofweek == 4
+    return weeks[-n:], rows[-n:]
+
+
 def _used_symbols(results: list[dict]) -> set[str]:
     used = set()
     for r in results:
         used |= {p["symbol"] for p in r["positions"]}
         used |= {p["symbol"] for p in r["pending"]}
         used |= {t["symbol"] for t in r["recent_trades"]}
+        used |= {t["symbol"] for t in r.get("week_trades", [])}
     return used
 
 
