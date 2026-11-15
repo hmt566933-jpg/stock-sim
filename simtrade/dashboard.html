@@ -102,10 +102,16 @@
     <p class="note">損益＝該週淨值變化（含持股未實現損益，已扣手續費與稅）。每個策略起始資金相同。</p>
     <div id="wtrades"></div>
 
-    <h3>下週展望</h3>
+    <h3 id="wfhead">下週展望</h3>
     <p class="note" style="margin:0 0 8px">根據各策略過去 52 週的週報酬分布估計，不是保證。股價無法準確預測，請當作「這個策略通常會怎樣」的參考。</p>
     <div class="scroll"><table id="wfcst"></table></div>
     <div id="wplan"></div>
+
+    <h3>展望準確度（近 26 週）</h3>
+    <p class="note" style="margin:0 0 8px">每一週都只用「當時已知」的資料做預估，再和那週實際結果比對。方向命中 50% 左右＝跟丟銅板差不多；範圍設計上約 80% 會落在內。</p>
+    <div class="scroll"><table id="wacc"></table></div>
+    <div id="wacchist"></div>
+    <p class="note">⚠︎＝實際結果超出常見範圍。</p>
 
     <h3>近幾週統計</h3>
     <div class="seg" id="wn" style="margin-bottom:8px"></div>
@@ -330,24 +336,40 @@ function drawWeekly(d) {
       `</table></div></details>`).join("");
   } else $("wtrades").innerHTML = "";
 
-  // 下週展望：用過去 52 週的週報酬分布
-  const q = (arr, p) => { const a = [...arr].sort((x, y) => x - y); const i = (a.length - 1) * p, lo = Math.floor(i);
-    return a[lo] + (a[Math.ceil(i)] - a[lo]) * (i - lo); };
-  const fc = d.strategies.map(s => {
-    const rets = s.weekly.map(x => x.ret), eqNow = s.equity[s.equity.length - 1] / 100 * d.initial_cash;
-    const med = q(rets, 0.5);
-    return { s, up: rets.filter(r => r > 0).length / rets.length * 100, med, lo: q(rets, 0.1), hi: q(rets, 0.9),
-             money: eqNow * med / 100, buys: s.pending.filter(p => p.action === "買進"), sells: s.pending.filter(p => p.action === "賣出") };
+  // 下週展望（Python 端用過去 52 週估計好的結果）
+  const fc = d.strategies.filter(s => s.forecast && s.forecast.next).map(s => {
+    const f = s.forecast.next, eqNow = s.equity[s.equity.length - 1] / 100 * d.initial_cash;
+    return { s, ...f, money: eqNow * f.med / 100, acc: s.forecast.accuracy,
+             buys: s.pending.filter(p => p.action === "買進"), sells: s.pending.filter(p => p.action === "賣出") };
   }).sort((a, b) => b.med - a.med);
-  $("wfcst").innerHTML = `<tr><th>策略</th><th>上漲機率</th><th>中位數</th><th>預估損益</th><th>常見範圍</th><th>週一動作</th></tr>` +
+  const lastDone = [...weeks].reverse().find(w => w.done) || weeks[last];
+  const nextMon = new Date(new Date(lastDone.start).getTime() + 7 * 864e5).toISOString().slice(0, 10);
+  $("wfhead").textContent = `下週展望（${md(nextMon)} 起）`;
+  $("wfcst").innerHTML = `<tr><th>策略</th><th>上漲機率</th><th>中位數</th><th>預估損益</th><th>常見範圍</th><th>過去命中</th><th>週一動作</th></tr>` +
     fc.map(r => `<tr><td><i class="key ${r.s.key === "benchmark" ? "dash" : ""}" style="border-color:${color(r.s.key)}"></i>${r.s.label}</td>
       <td>${r.up.toFixed(0)}%</td><td>${fmtPct(r.med)}</td><td><span class="${r.money > 0 ? "pos" : r.money < 0 ? "neg" : ""}">${fmtMoney(r.money)}</span></td>
       <td>${r.lo.toFixed(1)}% ~ ${r.hi > 0 ? "+" : ""}${r.hi.toFixed(1)}%</td>
+      <td>${r.acc.hit_rate == null ? "–" : r.acc.hit_rate.toFixed(0) + "%"}</td>
       <td>${r.buys.length || r.sells.length ? `買 ${r.buys.length}／賣 ${r.sells.length}` : "不動"}</td></tr>`).join("");
   $("wplan").innerHTML = fc.filter(r => r.buys.length || r.sells.length).map(r =>
     `<details><summary>${r.s.label}：下個交易日 買 ${r.buys.length} 檔、賣 ${r.sells.length} 檔</summary>
       <p>${r.buys.map(p => `<span class="pill">買 ${stock(p.symbol)}</span>`).join("")}${r.sells.map(p => `<span class="pill">賣 ${stock(p.symbol)}</span>`).join("")}</p></details>`).join("") +
-    `<p class="note">「常見範圍」＝過去 80% 的週落在這個區間；「預估損益」＝目前資金 × 中位數週報酬。週一動作是依最新收盤訊號，週一開盤執行。</p>`;
+    `<p class="note">「常見範圍」＝過去 80% 的週落在這個區間；「預估損益」＝目前資金 × 中位數週報酬；「過去命中」＝近 26 週猜對漲跌方向的比例。週一動作是依最新收盤訊號，週一開盤執行。</p>`;
+
+  // 展望準確度：每一週都只用那週之前的資料估計，再跟實際比
+  const acc = d.strategies.filter(s => s.forecast && s.forecast.accuracy.weeks);
+  $("wacc").innerHTML = `<tr><th>策略</th><th>方向命中</th><th>落在範圍內</th><th>平均誤差</th><th>週數</th></tr>` +
+    acc.map(s => { const a = s.forecast.accuracy;
+      return `<tr><td><i class="key ${s.key === "benchmark" ? "dash" : ""}" style="border-color:${color(s.key)}"></i>${s.label}</td>
+        <td>${a.hit_rate}%</td><td>${a.inside_rate}%</td><td>${a.mae.toFixed(2)}%</td><td>${a.weeks}</td></tr>`; }).join("");
+  $("wacchist").innerHTML = acc.map(s => {
+    const h = s.forecast.history.slice(-12).reverse();
+    const doneWeeks = weeks.filter(w => w.done).slice(-s.forecast.history.length).slice(-12).reverse();
+    return `<details><summary>${s.label}：近 ${h.length} 週 預估 vs 實際</summary><div class="scroll"><table>
+      <tr><th>週</th><th>上漲機率</th><th>預估中位數</th><th>常見範圍</th><th>實際</th><th>方向</th></tr>` +
+      h.map((x, i) => `<tr><td>${doneWeeks[i] ? md(doneWeeks[i].start) : ""}</td><td>${x.up.toFixed(0)}%</td><td>${fmtPct(x.med)}</td>
+        <td>${x.lo.toFixed(1)} ~ ${x.hi.toFixed(1)}%</td><td>${fmtPct(x.actual)}${x.inside ? "" : " ⚠︎"}</td><td>${x.hit ? "✓ 對" : "✗ 錯"}</td></tr>`).join("") +
+      `</table></div></details>`; }).join("");
 
   // 近 N 週統計
   seg($("wn"), [["4週", 4], ["12週", 12], ["26週", 26], ["52週", 52]], state.wn, v => { state.wn = v; render(); });

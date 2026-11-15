@@ -79,6 +79,16 @@ def test_all_strategies_run():
         assert (w > 0).to_numpy().any(), f"{name} 從來沒有進場"
 
 
+def test_forecast_uses_only_past():
+    from simtrade import forecast
+    rets = [1.0] * 30 + [-5.0]
+    out = forecast.build(rets, [True] * 31)
+    last = out["history"][-1]
+    assert last["med"] == 1.0 and last["actual"] == -5.0 and last["hit"] is False  # 預估時看不到 -5
+    assert out["next"]["med"] == 1.0
+    assert forecast.build([1.0] * 10, [True] * 10)["next"] is None             # 資料不足不估
+
+
 def test_round_trip_and_limits():
     c = Costs(fee_rate=0.001425, fee_discount=1, min_fee=20)
     a = Account(cash=100_000, costs=c)
@@ -129,6 +139,7 @@ def test_full_pipeline(tmp=Path(__file__).resolve().parent / "_out"):
                     if t["side"] == "買" and t["symbol"].startswith("S"):
                         assert (int(t["symbol"][1:]) + 1) % 5 != 0, t
         assert len(out["strategies"]) == 1 + len(cfg["strategies"])
+        assert all(s["forecast"]["accuracy"]["weeks"] > 0 for s in out["strategies"])
         for s in out["strategies"]:
             assert s["equity"][0] == 100 and s["cash"] >= 0
             assert len(s["equity"]) == len(out["dates"])

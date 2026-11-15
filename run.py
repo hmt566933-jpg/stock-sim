@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from simtrade import data, engine, metrics, strategies, universe
+from simtrade import data, engine, forecast, metrics, strategies, universe
 from simtrade.broker import Costs
 
 ROOT = Path(__file__).resolve().parent
@@ -51,10 +51,12 @@ def run_market(key: str, cfg: dict, offline: bool = False, long: pd.DataFrame | 
                        execution=cfg.get("execution", "next_open"),
                        band=cfg.get("rebalance_band", 0.02))
         eq = r["equity"]
-        weeks, wrows = weekly(eq, m["initial_cash"])
+        all_weeks, all_rows = weekly(eq, m["initial_cash"], n=10_000)
+        fc = forecast.build([r["ret"] for r in all_rows], [w["done"] for w in all_weeks])
+        weeks, wrows = all_weeks[-52:], all_rows[-52:]
         week_trades = [t for t in r["trades"] if weeks and t["date"] >= weeks[-1]["start"]]
         results.append(dict(
-            weekly=wrows, week_trades=week_trades[::-1],
+            weekly=wrows, week_trades=week_trades[::-1], forecast=fc,
             key=name, label=strat.label, stats=metrics.summarize(eq, r["trades"]),
             equity=[round(v / m["initial_cash"] * 100, 2) for v in eq],  # 起始 = 100
             positions=r["positions"], cash=r["cash"],
