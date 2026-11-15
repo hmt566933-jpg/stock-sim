@@ -77,7 +77,8 @@ def run_market(key: str, cfg: dict, offline: bool = False, long: pd.DataFrame | 
         weeks=weeks, max_positions=k, exits=cfg.get("exits", {}), strategies=results,
         names={s: names.get(s, "") for s in _used_symbols(results)},
     )
-    out["analysis"] = analysis.generate(out)
+    out["ai_brief"] = analysis.facts(out)
+    out["analysis"] = analysis.generate(out, out["ai_brief"])
     (DOCS / "data").mkdir(parents=True, exist_ok=True)
     (DOCS / "data" / f"{key}.json").write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
     best = max(results, key=lambda x: x["stats"]["total_return"])

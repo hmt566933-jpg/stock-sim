@@ -52,8 +52,12 @@ jobs:
 
       - name: 跑模擬
         env:
-          # 選用：在 Settings → Secrets and variables → Actions 新增 ANTHROPIC_API_KEY 就會改用 AI 寫分析
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # 選用：在 Settings → Secrets and variables → Actions 設定其中一家的金鑰，就會產生 AI 分析
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+          OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL }}
         run: python run.py --market ${{ steps.pick.outputs.market }}
 
       - name: 存回結果

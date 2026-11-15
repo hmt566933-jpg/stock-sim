@@ -26,14 +26,19 @@
 
 > 注意：repo 如果 60 天都沒有任何人推送變更，GitHub 會暫停排程。這個專案每天都會自動 commit，正常情況不會被暫停。
 
-## 白話分析（選用 AI）
+## AI 分析
 
-儀表板第一個分頁「白話分析」每天會用一般人看得懂的話，整理這週誰賺誰賠、長期誰有效、下週要注意什麼。
+**自動分析（選用）**：到 repo → **Settings → Secrets and variables → Actions → New repository secret**，新增其中一個：
 
-- **預設（免費）**：用內建規則自動產生。
-- **改用 AI 撰寫**：到 Anthropic Console（console.anthropic.com）申請 API 金鑰（需付費，每天兩次分析約幾塊台幣），然後在 repo →
-  **Settings → Secrets and variables → Actions → New repository secret**，Name 填 `ANTHROPIC_API_KEY`、Secret 貼上金鑰。
-  之後每次執行就會改由 AI 撰寫；AI 失敗時會自動退回內建規則。
+| Secret 名稱 | 服務 | 預設模型（可改） |
+|---|---|---|
+| `GEMINI_API_KEY` | Google Gemini | `gemini-flash-latest`（Variables 設 `GEMINI_MODEL` 可換） |
+| `OPENAI_API_KEY` | OpenAI | `chat-latest`（Variables 設 `OPENAI_MODEL` 可換） |
+
+其他相容 OpenAI 格式的服務：用 `OPENAI_API_KEY` 放該服務的金鑰，再到 **Variables** 新增 `OPENAI_BASE_URL`（服務的 API 網址）和 `OPENAI_MODEL`。
+設定後每次執行都會產生分析，顯示在儀表板第一個分頁「AI 分析」；沒設定時這個分頁不會出現。
+
+**手動**：儀表板上方的「複製數據給 AI」按鈕，會把目前市場的重點數字（本週損益、累積報酬、最大回撤、交易成本、下週展望、大盤濾網狀態、週一買賣筆數）複製起來，貼到你習慣用的 AI 就能請它分析。
 
 ## 調整設定：`config.json`
 

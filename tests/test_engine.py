@@ -105,16 +105,15 @@ def test_market_filter_blocks_new_entries():
     assert off.market_filter is None
 
 
-def test_rule_based_analysis():
+def test_ai_brief():
     import json
     import run as runner
-    from simtrade import analysis
     cfg = json.loads((runner.ROOT / "config.json").read_text(encoding="utf-8"))
     syms = ["0050.TW"] + [f"S{i:03d}" for i in range(80)]
     runner.DOCS = Path(__file__).resolve().parent / "_out"
     out = runner.run_market("tw", cfg, long=fake_long(syms, seed=3), names={s: s for s in syms})
-    text = out["analysis"]["text"]
-    assert out["analysis"]["source"] == "rule" and "## " in text and "不是投資建議" in text
+    brief = out["ai_brief"]
+    assert brief["market"] == "台股" and len(brief["strategies"]) == 1 + len(cfg["strategies"])
     assert out["market_filter"] is not None
 
 

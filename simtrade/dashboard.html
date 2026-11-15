@@ -66,16 +66,17 @@
   .muted { color: var(--text-muted); font-size: 13px; }
   .pill { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 99px; border: 1px solid var(--border); margin: 2px 4px 2px 0; }
   .note { font-size: 12px; color: var(--text-muted); }
-  .ai h3 { font-size: 15px; margin: 16px 0 6px; }
-  .ai h3:first-child { margin-top: 0; }
-  .ai p { margin: 0 0 8px; line-height: 1.75; }
-  .ai ul { margin: 0 0 8px; padding-left: 20px; line-height: 1.75; }
   .tabs { position: sticky; top: 0; z-index: 3; display: flex; gap: 4px; background: var(--surface-0);
           border-bottom: 1px solid var(--border); margin: 0 -16px 14px; padding: 6px 16px 0; overflow-x: auto; }
+  .ai h3 { font-size: 15px; margin: 16px 0 6px; }
+  .ai h3:first-child { margin-top: 0; }
+  .ai p { margin: 0 0 8px; line-height: 1.7; }
+  .ai ul { margin: 0 0 8px; padding-left: 20px; line-height: 1.7; }
   .tabs { scrollbar-width: none; }
   .tabs::-webkit-scrollbar { display: none; }
   .tabs button { border: 0; background: none; color: var(--text-secondary); font: inherit; font-size: 14px;
                  padding: 8px 8px 10px; cursor: pointer; white-space: nowrap; border-bottom: 2px solid transparent; }
+  .tabs button[hidden] { display: none; }
   .tabs button[aria-selected="true"] { color: var(--text-primary); font-weight: 600; border-bottom-color: var(--text-primary); }
   [data-page][hidden] { display: none; }
   .wnav { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
@@ -105,10 +106,11 @@
 
   <div class="row">
     <div class="seg" id="mkt"></div>
+    <button class="chip" id="copybrief" onclick="copyBrief()" style="margin-left:auto">複製數據給 AI</button>
   </div>
 
   <nav class="tabs" id="tabs">
-    <button data-tab="ai">白話分析</button>
+    <button data-tab="ai" id="aitab">AI 分析</button>
     <button data-tab="week">每週損益</button>
     <button data-tab="next">下週展望</button>
     <button data-tab="total">累積績效</button>
@@ -117,7 +119,7 @@
 
   <div data-page="ai">
     <section class="card">
-      <h2>白話分析</h2>
+      <h2>AI 分析</h2>
       <div id="aitext" class="ai"></div>
       <p class="note" id="aisrc"></p>
     </section>
@@ -233,13 +235,18 @@ function sliceIdx(d) {
 
 function render() {
   const d = DATA[state.market];
+  // 沒有 AI 分析時隱藏該分頁
+  $("aitab").hidden = !d.analysis;
+  if (state.tab === "ai" && !d.analysis) state.tab = "week";
   // 分頁：先切換顯示，再畫圖（隱藏中的圖表量不到寬度）
   document.querySelectorAll("#tabs button").forEach(b => b.setAttribute("aria-selected", String(b.dataset.tab === state.tab)));
   document.querySelectorAll("[data-page]").forEach(p => p.hidden = p.dataset.page !== state.tab);
   $("meta").textContent = `${d.name}｜資料至 ${d.last_date}｜更新於 ${d.updated_at}（台北）｜股票池 ${fmtNum(d.universe_size)} 檔，今日可交易 ${fmtNum(d.eligible_today)} 檔｜每個策略最多持有 ${d.max_positions} 檔，起始資金 ${fmtNum(d.initial_cash)} ${d.currency}`;
   seg($("mkt"), Object.keys(DATA).map(k => [DATA[k].name, k]), state.market, v => { state.market = v; state.week = null; render(); });
   drawWeekly(d);
+  drawFilter(d);
   drawAnalysis(d);
+  $("copybrief").style.display = d.ai_brief ? "" : "none";
   if (!state.shown[state.market]) state.shown[state.market] = defaultShown(d);
   const shown = state.shown[state.market];
   seg($("rng"), RANGES, state.range, v => { state.range = v; render(); });
@@ -458,26 +465,43 @@ const esc = t => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;",
 
 function drawAnalysis(d) {
   const a = d.analysis;
-  if (!a) { $("aitext").innerHTML = '<p class="muted">下次自動更新後就會有分析。</p>'; $("aisrc").textContent = ""; return; }
+  if (!a) return;
   let html = "", inList = false;
   for (const raw of a.text.split("\n")) {
     const line = raw.trim().replace(/\*\*/g, "");
     if (!line) continue;
-    if (line.startsWith("- ") || line.startsWith("• ")) {
+    if (/^[-•*]\s/.test(line)) {
       if (!inList) { html += "<ul>"; inList = true; }
-      html += `<li>${esc(line.slice(2))}</li>`; continue;
+      html += `<li>${esc(line.replace(/^[-•*]\s/, ""))}</li>`; continue;
     }
     if (inList) { html += "</ul>"; inList = false; }
     html += line.startsWith("#") ? `<h3>${esc(line.replace(/^#+\s*/, ""))}</h3>` : `<p>${esc(line)}</p>`;
   }
   if (inList) html += "</ul>";
   $("aitext").innerHTML = html;
-  $("aisrc").textContent = a.source === "ai" ? `由 AI（${a.model}）根據 ${d.last_date} 的模擬結果撰寫。內容可能有誤，請以數字為準。`
-    : `由內建規則根據 ${d.last_date} 的模擬結果自動產生。設定 AI 金鑰後可改由 AI 撰寫（見 README）。`;
+  $("aisrc").textContent = `${a.provider}（${a.model}）根據 ${d.last_date} 的資料撰寫，內容可能有誤，請以數字為準。`;
+}
+
+function drawFilter(d) {
   const mf = d.market_filter;
   $("mfstate").innerHTML = mf ? (mf.on
     ? `<span class="pill">大盤濾網：開放進場</span> <span class="muted">大盤 ${mf.price} 在 ${mf.ma} 日線 ${mf.ma_value} 之上</span>`
     : `<span class="pill">大盤濾網：暫停進場</span> <span class="muted">大盤 ${mf.price} 跌破 ${mf.ma} 日線 ${mf.ma_value}，有濾網的策略不買新股</span>`) : "";
+}
+
+// 複製重點數據，貼到任何 AI 都能直接分析
+async function copyBrief() {
+  const d = DATA[state.market];
+  const text = `以下是我的股票策略模擬倉（${d.name}，資料至 ${d.last_date}）的重點數據，JSON 格式。` +
+    `規則：每天收盤後產生訊號、隔天開盤成交，每個策略最多持有 ${d.max_positions} 檔，已扣手續費與稅。\n\n` +
+    JSON.stringify(d.ai_brief || {}, null, 1);
+  const btn = $("copybrief");
+  try { await navigator.clipboard.writeText(text); }
+  catch (e) {  // 舊瀏覽器備援
+    const ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta);
+    ta.select(); document.execCommand("copy"); ta.remove();
+  }
+  btn.textContent = "已複製 ✓"; setTimeout(() => btn.textContent = "複製數據給 AI", 1800);
 }
 
 function drawTable(series) {
