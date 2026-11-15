@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from simtrade import data, engine, forecast, metrics, strategies, universe
+from simtrade import analysis, data, engine, forecast, metrics, strategies, universe
 from simtrade.broker import Costs
 
 ROOT = Path(__file__).resolve().parent
@@ -40,6 +40,9 @@ def run_market(key: str, cfg: dict, offline: bool = False, long: pd.DataFrame | 
     costs = Costs(etf_prefix=m.get("etfs_prefix"), **m["costs"])
     k = cfg.get("max_positions", 10)
     defaults = {"max_positions": k, **cfg.get("exits", {})}
+    mf = cfg.get("market_filter")
+    if mf:
+        defaults["market_filter"] = {"symbol": m["benchmark"], **mf}
 
     strats = [("benchmark", strategies.Benchmark(m["benchmark"], label=f"大盤 {m['benchmark']}"))]
     strats += [(name, strategies.build(name, scfg, defaults)) for name, scfg in cfg["strategies"].items()]
@@ -70,9 +73,11 @@ def run_market(key: str, cfg: dict, offline: bool = False, long: pd.DataFrame | 
         updated_at=datetime.now(TPE).strftime("%Y-%m-%d %H:%M"),
         dates=[str(d.date()) for d in wide["close"].index],
         universe_size=int(wide["close"].shape[1]), eligible_today=int(elig.iloc[-1].sum()),
+        market_filter=_filter_state(wide["close"], m["benchmark"], mf),
         weeks=weeks, max_positions=k, exits=cfg.get("exits", {}), strategies=results,
         names={s: names.get(s, "") for s in _used_symbols(results)},
     )
+    out["analysis"] = analysis.generate(out)
     (DOCS / "data").mkdir(parents=True, exist_ok=True)
     (DOCS / "data" / f"{key}.json").write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
     best = max(results, key=lambda x: x["stats"]["total_return"])
@@ -92,6 +97,16 @@ def weekly(eq: pd.Series, initial: float, n: int = 52) -> tuple[list[dict], list
     if weeks:  # 最後一週如果還沒到週五，標示為進行中
         weeks[-1]["done"] = eq.index[-1].dayofweek == 4
     return weeks[-n:], rows[-n:]
+
+
+def _filter_state(close: pd.DataFrame, bench: str, mf: dict | None) -> dict | None:
+    """大盤濾網目前狀態（給儀表板與白話分析）。"""
+    if not mf or bench not in close.columns:
+        return None
+    b = close[bench].ffill()
+    ma = b.rolling(mf.get("ma", 20)).mean()
+    return dict(ma=mf.get("ma", 20), price=round(float(b.iloc[-1]), 2), ma_value=round(float(ma.iloc[-1]), 2),
+                on=bool(b.iloc[-1] > ma.iloc[-1]))
 
 
 def _used_symbols(results: list[dict]) -> set[str]:

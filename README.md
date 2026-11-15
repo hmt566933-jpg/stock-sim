@@ -26,6 +26,15 @@
 
 > 注意：repo 如果 60 天都沒有任何人推送變更，GitHub 會暫停排程。這個專案每天都會自動 commit，正常情況不會被暫停。
 
+## 白話分析（選用 AI）
+
+儀表板第一個分頁「白話分析」每天會用一般人看得懂的話，整理這週誰賺誰賠、長期誰有效、下週要注意什麼。
+
+- **預設（免費）**：用內建規則自動產生。
+- **改用 AI 撰寫**：到 Anthropic Console（console.anthropic.com）申請 API 金鑰（需付費，每天兩次分析約幾塊台幣），然後在 repo →
+  **Settings → Secrets and variables → Actions → New repository secret**，Name 填 `ANTHROPIC_API_KEY`、Secret 貼上金鑰。
+  之後每次執行就會改由 AI 撰寫；AI 失敗時會自動退回內建規則。
+
 ## 調整設定：`config.json`
 
 - `universe.min_turnover`：流動性門檻；`max_positions`：每個策略最多持有幾檔
@@ -50,6 +59,11 @@
 | kd_cross | KD 低檔黃金交叉 | K 穿越 D 且 K < 30 | K > 80 |
 | pullback | 多頭連3跌反彈 | 收盤 > 60 日線、連跌 3 天 | 第一根收漲 |
 | momentum | 週動能輪動 | 每週五挑 20 日漲幅前 10 名 | 下週重新排名換股 |
+
+| momentum_10 / momentum_60 | 週動能 10日 / 60日 | 同上，改看 10 / 60 日漲幅 | 同上 |
+| momentum_raw | 週動能（無濾網） | 同週動能輪動，但不使用大盤濾網，用來比較濾網有沒有幫助 | 同上 |
+
+**大盤濾網**（`config.json` 的 `market_filter`）：大盤（0050 / SPY）收盤跌破 20 日線時，所有策略都不開新倉（週動能類直接空手）；已持有的股票照原本規則出場。個別策略可設 `"market_filter": false` 關掉。
 
 每個策略最多同時持有 10 檔。同一套策略可以用不同參數複製多份比較，例如在 `strategies` 加一個
 `"breakout_60": {"type": "breakout", "label": "60日新高突破", "lookback": 60}`。

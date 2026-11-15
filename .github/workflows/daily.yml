@@ -51,6 +51,9 @@ jobs:
           fi
 
       - name: 跑模擬
+        env:
+          # 選用：在 Settings → Secrets and variables → Actions 新增 ANTHROPIC_API_KEY 就會改用 AI 寫分析
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python run.py --market ${{ steps.pick.outputs.market }}
 
       - name: 存回結果

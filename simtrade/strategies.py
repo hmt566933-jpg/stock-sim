@@ -97,16 +97,27 @@ class Strategy:
     rebalance = False
 
     def __init__(self, label: str = "", max_positions: int = 10, max_hold_days: int | None = None,
-                 stop_loss: float | None = None, take_profit: float | None = None, **params):
+                 stop_loss: float | None = None, take_profit: float | None = None,
+                 market_filter: dict | None = None, **params):
         self.label = label or self.__class__.__name__
         self.k = max_positions
         self.max_hold, self.stop_loss, self.take_profit = max_hold_days, stop_loss, take_profit
+        self.market_filter = market_filter  # {"symbol": "0050.TW", "ma": 20} 或 None（不使用）
         self.params = params
 
     def p(self, name, default):
         return self.params.get(name, default)
 
+    def market_ok(self, close: pd.DataFrame) -> pd.Series:
+        """大盤濾網：大盤收盤在 N 日均線之上才允許開新倉。沒設定時永遠允許。"""
+        f = self.market_filter
+        if not f or f.get("symbol") not in close.columns:
+            return pd.Series(True, index=close.index)
+        b = close[f["symbol"]].ffill()
+        return (b > sma(b, f.get("ma", 20))).fillna(False)
+
     def pick(self, entry, keep, close):
+        entry = entry.where(self.market_ok(close), axis=0)  # 大盤弱勢時不開新倉（已持有的照原規則出場）
         return select(entry, keep, self.k, close, self.max_hold, self.stop_loss, self.take_profit)
 
     def target_weights(self, wide: dict, eligible: pd.DataFrame) -> pd.DataFrame:
@@ -220,14 +231,16 @@ class Momentum(Strategy):
     def target_weights(self, wide, eligible):
         c = wide["close"]
         ret = (c / c.shift(self.p("lookback", 20)) - 1).where(eligible)
+        ok = self.market_ok(c)
         period = pd.Series(c.index.to_period(self.p("freq", "W")), index=c.index)
         last_day = (period != period.shift(-1)).to_numpy()
         w = pd.DataFrame(np.nan, index=c.index, columns=c.columns)
         for dt in c.index[last_day]:
             r = ret.loc[dt].dropna()
-            picks = r[r > 0].nlargest(self.k).index
             row = pd.Series(0.0, index=c.columns)
-            row[picks] = 1.0 / self.k
+            if ok.loc[dt]:  # 大盤弱勢時整週空手
+                picks = r[r > 0].nlargest(self.k).index
+                row[picks] = 1.0 / self.k
             w.loc[dt] = row
         return w.ffill().fillna(0.0)
 
@@ -247,6 +260,8 @@ REGISTRY = {
 def build(name: str, cfg: dict, defaults: dict) -> Strategy:
     """defaults：config 裡的共同設定（max_positions、exits）；個別策略可覆寫。"""
     params = {**defaults, **{k: v for k, v in cfg.items() if k not in ("label", "type")}}
+    if params.get("market_filter") is False:  # 個別策略可用 "market_filter": false 關掉濾網
+        params["market_filter"] = None
     cls = REGISTRY[cfg.get("type", name)]
     return cls(label=cfg.get("label", name), **params)
 

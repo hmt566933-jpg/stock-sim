@@ -89,6 +89,35 @@ def test_forecast_uses_only_past():
     assert forecast.build([1.0] * 10, [True] * 10)["next"] is None             # 資料不足不估
 
 
+def test_market_filter_blocks_new_entries():
+    from simtrade.data import to_wide
+    wide = to_wide(fake_long(["BENCH", "A", "B"], days=120))
+    wide["close"]["BENCH"] = np.r_[np.linspace(100, 200, 60), np.linspace(200, 100, 60)]  # 先漲後跌
+    elig = wide["close"].notna()
+    st = strategies.build("breakout", {"type": "breakout", "lookback": 5, "min_vol_ratio": 0},
+                          {"max_positions": 2, "market_filter": {"symbol": "BENCH", "ma": 20}})
+    ok = st.market_ok(wide["close"])
+    assert ok.iloc[40] and not ok.iloc[100]
+    w = st.target_weights(wide, elig)
+    new_buy = (w > 0) & (w.shift(1).fillna(0) == 0)
+    assert not new_buy[~ok].to_numpy().any()          # 大盤弱勢的日子沒有新進場
+    off = strategies.build("breakout", {"market_filter": False}, {"market_filter": {"symbol": "BENCH"}})
+    assert off.market_filter is None
+
+
+def test_rule_based_analysis():
+    import json
+    import run as runner
+    from simtrade import analysis
+    cfg = json.loads((runner.ROOT / "config.json").read_text(encoding="utf-8"))
+    syms = ["0050.TW"] + [f"S{i:03d}" for i in range(80)]
+    runner.DOCS = Path(__file__).resolve().parent / "_out"
+    out = runner.run_market("tw", cfg, long=fake_long(syms, seed=3), names={s: s for s in syms})
+    text = out["analysis"]["text"]
+    assert out["analysis"]["source"] == "rule" and "## " in text and "不是投資建議" in text
+    assert out["market_filter"] is not None
+
+
 def test_round_trip_and_limits():
     c = Costs(fee_rate=0.001425, fee_discount=1, min_fee=20)
     a = Account(cash=100_000, costs=c)

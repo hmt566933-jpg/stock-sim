@@ -45,6 +45,7 @@
   .chip.all { color: var(--text-primary); }
   .key { display: inline-block; width: 14px; height: 0; border-top: 2px solid; vertical-align: middle; margin-right: 5px; }
   .key.dash { border-top-style: dashed; }
+  .key.dot { border-top-style: dotted; border-top-width: 3px; }
   #chart { position: relative; }
   #chart svg { display: block; width: 100%; height: auto; touch-action: pan-y; }
   .tip { position: absolute; pointer-events: none; background: var(--surface-1); border: 1px solid var(--border);
@@ -65,10 +66,16 @@
   .muted { color: var(--text-muted); font-size: 13px; }
   .pill { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 99px; border: 1px solid var(--border); margin: 2px 4px 2px 0; }
   .note { font-size: 12px; color: var(--text-muted); }
+  .ai h3 { font-size: 15px; margin: 16px 0 6px; }
+  .ai h3:first-child { margin-top: 0; }
+  .ai p { margin: 0 0 8px; line-height: 1.75; }
+  .ai ul { margin: 0 0 8px; padding-left: 20px; line-height: 1.75; }
   .tabs { position: sticky; top: 0; z-index: 3; display: flex; gap: 4px; background: var(--surface-0);
           border-bottom: 1px solid var(--border); margin: 0 -16px 14px; padding: 6px 16px 0; overflow-x: auto; }
-  .tabs button { border: 0; background: none; color: var(--text-secondary); font: inherit; font-size: 15px;
-                 padding: 8px 12px 10px; cursor: pointer; white-space: nowrap; border-bottom: 2px solid transparent; }
+  .tabs { scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tabs button { border: 0; background: none; color: var(--text-secondary); font: inherit; font-size: 14px;
+                 padding: 8px 8px 10px; cursor: pointer; white-space: nowrap; border-bottom: 2px solid transparent; }
   .tabs button[aria-selected="true"] { color: var(--text-primary); font-weight: 600; border-bottom-color: var(--text-primary); }
   [data-page][hidden] { display: none; }
   .wnav { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
@@ -101,11 +108,20 @@
   </div>
 
   <nav class="tabs" id="tabs">
+    <button data-tab="ai">白話分析</button>
     <button data-tab="week">每週損益</button>
     <button data-tab="next">下週展望</button>
     <button data-tab="total">累積績效</button>
     <button data-tab="hold">持倉</button>
   </nav>
+
+  <div data-page="ai">
+    <section class="card">
+      <h2>白話分析</h2>
+      <div id="aitext" class="ai"></div>
+      <p class="note" id="aisrc"></p>
+    </section>
+  </div>
 
   <div data-page="week">
     <section class="card" id="wcard">
@@ -130,6 +146,7 @@
   <div data-page="next">
     <section class="card">
       <h2 id="wfhead">下週展望</h2>
+      <p id="mfstate" style="margin:0 0 8px"></p>
       <p class="note" style="margin:0 0 8px">根據各策略過去 52 週的週報酬分布估計，不是保證。股價無法準確預測，請當作「這個策略通常會怎樣」的參考。</p>
       <div class="scroll"><table id="wfcst"></table></div>
       <div id="wplan"></div>
@@ -174,12 +191,15 @@ const DATA = /*__DATA__*/null;
 // 顏色跟著策略走（依 config 順序固定配色），不會因排名或篩選而改變
 const SLOT = {};
 Object.values(DATA).forEach(d => d.strategies.filter(s => s.key !== "benchmark")
-  .forEach(s => { if (!(s.key in SLOT)) SLOT[s.key] = Object.keys(SLOT).length % 8 + 1; }));
-const color = k => k === "benchmark" ? "var(--bench)" : `var(--s${SLOT[k] || 1})`;
+  .forEach(s => { if (!(s.key in SLOT)) SLOT[s.key] = Object.keys(SLOT).length; }));
+// 超過 8 個策略時重複使用 8 種顏色，第 9 個起改用點線區分
+const color = k => k === "benchmark" ? "var(--bench)" : `var(--s${(SLOT[k] || 0) % 8 + 1})`;
+const keyCls = k => k === "benchmark" ? "dash" : (SLOT[k] || 0) >= 8 ? "dot" : "";
+const dashArr = k => k === "benchmark" ? 'stroke-dasharray="5 4"' : (SLOT[k] || 0) >= 8 ? 'stroke-dasharray="1.5 3" stroke-linecap="round"' : "";
 const RANGES = [["全部", null], ["1年", 365], ["3個月", 91], ["1個月", 31], ["1週", 7]];
-const TABS = ["week", "next", "total", "hold"];
+const TABS = ["ai", "week", "next", "total", "hold"];
 let state = { market: Object.keys(DATA)[0], range: null, shown: {}, week: null, wn: 12,
-              tab: TABS.includes(location.hash.slice(1)) ? location.hash.slice(1) : "week" };
+              tab: TABS.includes(location.hash.slice(1)) ? location.hash.slice(1) : "ai" };
 document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => {
   state.tab = b.dataset.tab; history.replaceState(null, "", "#" + state.tab); render(); window.scrollTo(0, 0);
 });
@@ -219,6 +239,7 @@ function render() {
   $("meta").textContent = `${d.name}｜資料至 ${d.last_date}｜更新於 ${d.updated_at}（台北）｜股票池 ${fmtNum(d.universe_size)} 檔，今日可交易 ${fmtNum(d.eligible_today)} 檔｜每個策略最多持有 ${d.max_positions} 檔，起始資金 ${fmtNum(d.initial_cash)} ${d.currency}`;
   seg($("mkt"), Object.keys(DATA).map(k => [DATA[k].name, k]), state.market, v => { state.market = v; state.week = null; render(); });
   drawWeekly(d);
+  drawAnalysis(d);
   if (!state.shown[state.market]) state.shown[state.market] = defaultShown(d);
   const shown = state.shown[state.market];
   seg($("rng"), RANGES, state.range, v => { state.range = v; render(); });
@@ -231,7 +252,7 @@ function render() {
   });
 
   $("legend").innerHTML = series.map(s =>
-    `<button class="chip" data-k="${s.key}" aria-pressed="${shown.has(s.key)}"><i class="key ${s.key === "benchmark" ? "dash" : ""}" style="border-color:${color(s.key)}"></i>${s.label}</button>`).join("") +
+    `<button class="chip" data-k="${s.key}" aria-pressed="${shown.has(s.key)}"><i class="key ${keyCls(s.key)}" style="border-color:${color(s.key)}"></i>${s.label}</button>`).join("") +
     `<button class="chip all" data-k="__all">${shown.size === series.length ? "只看前3名" : "全部顯示"}</button>`;
   $("legend").querySelectorAll("button").forEach(b => b.onclick = () => {
     const k = b.dataset.k;
@@ -276,7 +297,7 @@ function drawChart(dates, series) {
     for (let i = 0; i < n; i += stride) dpath += (i ? "L" : "M") + x(i).toFixed(1) + "," + y(s.vals[i]).toFixed(1);
     dpath += "L" + x(n - 1).toFixed(1) + "," + y(s.vals[n - 1]).toFixed(1);
     lines += `<path d="${dpath}" fill="none" stroke="${color(s.key)}" stroke-width="2" stroke-linejoin="round"
-              ${s.key === "benchmark" ? 'stroke-dasharray="5 4"' : ""}/>`;
+              ${dashArr(s.key)}/>`;
   }
 
   // 線尾直接標示（避免重疊：依 y 排序後最小間距 14px）
@@ -309,7 +330,7 @@ function drawChart(dates, series) {
     svg.querySelector("#dots").innerHTML = series.map(s =>
       `<circle cx="${cx}" cy="${y(s.vals[i])}" r="4" fill="${color(s.key)}" stroke="var(--surface-1)" stroke-width="2"/>`).join("");
     const rows = [...series].sort((a, b) => b.vals[i] - a.vals[i]).map(s =>
-      `<div><span><i class="key ${s.key === "benchmark" ? "dash" : ""}" style="border-color:${color(s.key)}"></i>${s.label}</span><span>${s.vals[i].toFixed(1)}</span></div>`).join("");
+      `<div><span><i class="key ${keyCls(s.key)}" style="border-color:${color(s.key)}"></i>${s.label}</span><span>${s.vals[i].toFixed(1)}</span></div>`).join("");
     tip.innerHTML = `<b>${dates[i]}</b>${rows}`;
     tip.style.display = "block";
     const left = cx / W * r.width;
@@ -354,7 +375,7 @@ function drawWeekly(d) {
     const half = Math.abs(v.ret) / maxAbs * 50;
     const up = v.ret >= 0;
     const bar = up ? `left:50%;width:${half}%` : `left:${50 - half}%;width:${half}%`;
-    return `<div class="lbl"><i class="key ${s.key === "benchmark" ? "dash" : ""}" style="border-color:${color(s.key)}"></i>${s.label}</div>
+    return `<div class="lbl"><i class="key ${keyCls(s.key)}" style="border-color:${color(s.key)}"></i>${s.label}</div>
       <div class="track"><div class="zero"></div>
         <div class="bar" style="${bar};background:var(${up ? "--up" : "--down"})"></div></div>
       <div class="num"><span class="${up ? "pos" : "neg"}">${v.ret > 0 ? "+" : ""}${v.ret.toFixed(2)}%</span><small>${fmtMoney(v.pnl)}</small></div>`;
@@ -379,7 +400,7 @@ function drawWeekly(d) {
   const nextMon = new Date(new Date(lastDone.start).getTime() + 7 * 864e5).toISOString().slice(0, 10);
   $("wfhead").textContent = `下週展望（${md(nextMon)} 起）`;
   $("wfcst").innerHTML = `<tr><th>策略</th><th>上漲機率</th><th>中位數</th><th>預估損益</th><th>常見範圍</th><th>過去命中</th><th>週一動作</th></tr>` +
-    fc.map(r => `<tr><td><i class="key ${r.s.key === "benchmark" ? "dash" : ""}" style="border-color:${color(r.s.key)}"></i>${r.s.label}</td>
+    fc.map(r => `<tr><td><i class="key ${keyCls(r.s.key)}" style="border-color:${color(r.s.key)}"></i>${r.s.label}</td>
       <td>${r.up.toFixed(0)}%</td><td>${fmtPct(r.med)}</td><td><span class="${r.money > 0 ? "pos" : r.money < 0 ? "neg" : ""}">${fmtMoney(r.money)}</span></td>
       <td>${r.lo.toFixed(1)}% ~ ${r.hi > 0 ? "+" : ""}${r.hi.toFixed(1)}%</td>
       <td>${r.acc.hit_rate == null ? "–" : r.acc.hit_rate.toFixed(0) + "%"}</td>
@@ -393,7 +414,7 @@ function drawWeekly(d) {
   const acc = d.strategies.filter(s => s.forecast && s.forecast.accuracy.weeks);
   $("wacc").innerHTML = `<tr><th>策略</th><th>方向命中</th><th>落在範圍內</th><th>平均誤差</th><th>週數</th></tr>` +
     acc.map(s => { const a = s.forecast.accuracy;
-      return `<tr><td><i class="key ${s.key === "benchmark" ? "dash" : ""}" style="border-color:${color(s.key)}"></i>${s.label}</td>
+      return `<tr><td><i class="key ${keyCls(s.key)}" style="border-color:${color(s.key)}"></i>${s.label}</td>
         <td>${a.hit_rate}%</td><td>${a.inside_rate}%</td><td>${a.mae.toFixed(2)}%</td><td>${a.weeks}</td></tr>`; }).join("");
   $("wacchist").innerHTML = acc.map(s => {
     const h = s.forecast.history.slice(-12).reverse();
@@ -417,7 +438,7 @@ function drawWeekly(d) {
              sum: ws.reduce((a, x) => a + x.pnl, 0) };
   }).sort((a, b) => b.sum - a.sum);
   $("wstats").innerHTML = `<tr><th>策略</th><th>累計損益</th><th>平均週報酬</th><th>賺錢週</th><th>贏大盤週</th><th>最好週</th><th>最差週</th></tr>` +
-    stats.map((r, k) => `<tr><td><span class="rank">${k + 1}</span><i class="key ${r.s.key === "benchmark" ? "dash" : ""}" style="border-color:${color(r.s.key)}"></i>${r.s.label}</td>
+    stats.map((r, k) => `<tr><td><span class="rank">${k + 1}</span><i class="key ${keyCls(r.s.key)}" style="border-color:${color(r.s.key)}"></i>${r.s.label}</td>
       <td><span class="${r.sum > 0 ? "pos" : r.sum < 0 ? "neg" : ""}">${fmtMoney(r.sum)}</span></td><td>${fmtPct(r.avg)}</td>
       <td>${r.win.toFixed(0)}%</td><td>${r.beat == null ? "–" : r.beat.toFixed(0) + "%"}</td>
       <td>${fmtPct(r.best)}</td><td>${fmtPct(r.worst)}</td></tr>`).join("");
@@ -427,10 +448,36 @@ function drawWeekly(d) {
   for (let i = last; i >= Math.max(0, weeks.length - Math.max(n, 4)); i--) cols.push(i);
   const scale = Math.max(1, ...d.strategies.flatMap(s => cols.map(i => Math.abs(s.weekly[i].ret))));
   $("wheat").innerHTML = `<tr><th>策略</th>${cols.map(i => `<th class="wk ${i === wi ? "sel" : ""}" data-i="${i}">${md(weeks[i].start)}</th>`).join("")}</tr>` +
-    d.strategies.map(s => `<tr><td><i class="key ${s.key === "benchmark" ? "dash" : ""}" style="border-color:${color(s.key)}"></i>${s.label}</td>` +
+    d.strategies.map(s => `<tr><td><i class="key ${keyCls(s.key)}" style="border-color:${color(s.key)}"></i>${s.label}</td>` +
       cols.map(i => { const v = s.weekly[i].ret, a = Math.round(Math.min(1, Math.abs(v) / scale) * 55);
         return `<td class="${i === wi ? "sel" : ""}" style="background:color-mix(in srgb, var(${v >= 0 ? "--up" : "--down"}) ${a}%, transparent)">${v > 0 ? "+" : ""}${v.toFixed(1)}</td>`; }).join("") + "</tr>").join("");
   $("wheat").querySelectorAll("th.wk").forEach(th => th.onclick = () => { state.week = +th.dataset.i; render(); });
+}
+
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function drawAnalysis(d) {
+  const a = d.analysis;
+  if (!a) { $("aitext").innerHTML = '<p class="muted">下次自動更新後就會有分析。</p>'; $("aisrc").textContent = ""; return; }
+  let html = "", inList = false;
+  for (const raw of a.text.split("\n")) {
+    const line = raw.trim().replace(/\*\*/g, "");
+    if (!line) continue;
+    if (line.startsWith("- ") || line.startsWith("• ")) {
+      if (!inList) { html += "<ul>"; inList = true; }
+      html += `<li>${esc(line.slice(2))}</li>`; continue;
+    }
+    if (inList) { html += "</ul>"; inList = false; }
+    html += line.startsWith("#") ? `<h3>${esc(line.replace(/^#+\s*/, ""))}</h3>` : `<p>${esc(line)}</p>`;
+  }
+  if (inList) html += "</ul>";
+  $("aitext").innerHTML = html;
+  $("aisrc").textContent = a.source === "ai" ? `由 AI（${a.model}）根據 ${d.last_date} 的模擬結果撰寫。內容可能有誤，請以數字為準。`
+    : `由內建規則根據 ${d.last_date} 的模擬結果自動產生。設定 AI 金鑰後可改由 AI 撰寫（見 README）。`;
+  const mf = d.market_filter;
+  $("mfstate").innerHTML = mf ? (mf.on
+    ? `<span class="pill">大盤濾網：開放進場</span> <span class="muted">大盤 ${mf.price} 在 ${mf.ma} 日線 ${mf.ma_value} 之上</span>`
+    : `<span class="pill">大盤濾網：暫停進場</span> <span class="muted">大盤 ${mf.price} 跌破 ${mf.ma} 日線 ${mf.ma_value}，有濾網的策略不買新股</span>`) : "";
 }
 
 function drawTable(series) {
@@ -439,7 +486,7 @@ function drawTable(series) {
   $("rank").innerHTML = `<tr><th>策略</th><th>總報酬</th><th>區間報酬</th><th>年化</th><th>最大回撤</th><th>Sharpe</th><th>交易</th><th>勝率</th><th>成本</th></tr>` +
     rows.map((r, k) => {
       const st = r.s.stats;
-      return `<tr><td><span class="rank">${k + 1}</span><i class="key ${r.key === "benchmark" ? "dash" : ""}" style="border-color:${color(r.key)}"></i>${r.label}</td>
+      return `<tr><td><span class="rank">${k + 1}</span><i class="key ${keyCls(r.key)}" style="border-color:${color(r.key)}"></i>${r.label}</td>
         <td>${fmtPct(st.total_return)}</td><td>${fmtPct(r.rr)}</td><td>${fmtPct(st.cagr)}</td>
         <td>${st.max_drawdown.toFixed(1)}%</td><td>${st.sharpe.toFixed(2)}</td><td>${st.trades}</td>
         <td>${st.win_rate == null ? "–" : st.win_rate + "%"}</td><td>${fmtNum(st.fees)}</td></tr>`;
@@ -459,7 +506,7 @@ function drawDetail(d) {
     const tr = s.recent_trades.length ? `<div class="scroll"><table><tr><th>日期</th><th>股票</th><th>買賣</th><th>股數</th><th>價格</th><th>已實現損益</th></tr>` +
       s.recent_trades.map(t => `<tr><td>${t.date}</td><td>${stock(t.symbol)}</td><td>${t.side}</td><td>${fmtNum(t.qty)}</td><td>${fmtNum(t.price)}</td><td>${t.pnl == null ? "–" : fmtNum(t.pnl)}</td></tr>`).join("") +
       `</table></div>` : "";
-    return `<details><summary><i class="key ${s.key === "benchmark" ? "dash" : ""}" style="border-color:${color(s.key)}"></i>${s.label}</summary>
+    return `<details><summary><i class="key ${keyCls(s.key)}" style="border-color:${color(s.key)}"></i>${s.label}</summary>
       <p>下一個交易日：${pend}</p>
       <p class="muted">現金 ${fmtNum(s.cash)} ${d.currency}</p>${pos}
       ${tr ? '<p class="muted" style="margin-top:12px">最近交易</p>' + tr : ""}</details>`;
