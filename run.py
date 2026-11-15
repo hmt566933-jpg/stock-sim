@@ -22,6 +22,7 @@ from simtrade.broker import Costs
 ROOT = Path(__file__).resolve().parent
 DOCS = ROOT / "docs"
 TPE = timezone(timedelta(hours=8))
+TRADE_WEEKS = 12
 
 
 def run_market(key: str, cfg: dict, offline: bool = False, long: pd.DataFrame | None = None,
@@ -57,7 +58,9 @@ def run_market(key: str, cfg: dict, offline: bool = False, long: pd.DataFrame | 
         all_weeks, all_rows = weekly(eq, m["initial_cash"], n=10_000)
         fc = forecast.build([r["ret"] for r in all_rows], [w["done"] for w in all_weeks])
         weeks, wrows = all_weeks[-52:], all_rows[-52:]
-        week_trades = [t for t in r["trades"] if weeks and t["date"] >= weeks[-1]["start"]]
+        # 保留最近 12 週的交易明細（再多會讓網頁太大、手機開很慢）
+        since = weeks[-TRADE_WEEKS]["start"] if len(weeks) >= TRADE_WEEKS else (weeks[0]["start"] if weeks else "")
+        week_trades = [t for t in r["trades"] if weeks and t["date"] >= since]
         results.append(dict(
             weekly=wrows, week_trades=week_trades[::-1], forecast=fc,
             key=name, label=strat.label, stats=metrics.summarize(eq, r["trades"]),

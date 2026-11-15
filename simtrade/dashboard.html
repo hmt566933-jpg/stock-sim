@@ -389,9 +389,11 @@ function drawWeekly(d) {
     const half = Math.abs(v.ret) / maxAbs * 50;
     const up = v.ret >= 0;
     const bar = up ? `left:50%;width:${half}%` : `left:${50 - half}%;width:${half}%`;
-    const tr = wi === last ? (s.week_trades || []) : null;
+    // 交易明細保留最近 12 週；更早的週只顯示損益
+    const keepFrom = Math.max(0, weeks.length - 12);
+    const tr = wi >= keepFrom ? (s.week_trades || []).filter(t => t.date >= w.start && t.date <= w.end) : null;
     const can = tr && tr.length, open = can && state.openW.has(s.key);
-    const sub = tr == null ? "" : `<small class="muted">${tr.length ? `${tr.length} 筆交易 ${open ? "▾" : "▸"}` : "本週無交易"}</small>`;
+    const sub = tr == null ? "" : `<small class="muted">${tr.length ? `${tr.length} 筆交易 ${open ? "▾" : "▸"}` : "這週無交易"}</small>`;
     const detail = open ? `<div class="wtr"><div class="scroll"><table>
         <tr><th>日期</th><th>股票</th><th>買賣</th><th>股數</th><th>價格</th><th>已實現損益</th></tr>` +
       tr.map(t => `<tr><td>${md(t.date)}</td><td>${stock(t.symbol)}</td><td>${t.side}</td><td>${fmtNum(t.qty)}</td><td>${fmtNum(t.price)}</td><td>${t.pnl == null ? "–" : fmtMoney(t.pnl)}</td></tr>`).join("") +
@@ -405,7 +407,7 @@ function drawWeekly(d) {
   $("wbars").querySelectorAll(".wrow.click").forEach(r => r.onclick = () => {
     const k = r.dataset.k; state.openW.has(k) ? state.openW.delete(k) : state.openW.add(k); drawWeekly(d);
   });
-  $("wtrades").innerHTML = wi === last ? "" : '<p class="note">交易明細只保留最近一週。</p>';
+  $("wtrades").innerHTML = wi >= Math.max(0, weeks.length - 12) ? "" : '<p class="note">交易明細只保留最近 12 週，這週只顯示損益。</p>';
 
   // 下週展望（Python 端用過去 52 週估計好的結果）
   const fc = d.strategies.filter(s => s.forecast && s.forecast.next).map(s => {

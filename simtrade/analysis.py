@@ -33,6 +33,7 @@ def facts(out: dict) -> dict:
 # ───────────────────────── 外部 AI 分析（選用） ─────────────────────────
 # 在 GitHub repo 的 Secrets 設定其中一個金鑰即可：
 #   GEMINI_API_KEY → Google Gemini（模型預設 gemini-flash-latest，可用 GEMINI_MODEL 變數改）
+#   XAI_API_KEY    → xAI Grok（模型預設 grok-4.7，可用 XAI_MODEL 改）
 #   OPENAI_API_KEY → OpenAI（模型預設 chat-latest，可用 OPENAI_MODEL 改；
 #                    設 OPENAI_BASE_URL 可接其他相容 OpenAI 格式的服務）
 # 都沒設定時不產生分析。
@@ -63,9 +64,9 @@ def _gemini(prompt: str, key: str) -> tuple[str, str]:
     return "".join(p.get("text", "") for p in parts).strip(), model
 
 
-def _openai(prompt: str, key: str) -> tuple[str, str]:
-    model = os.environ.get("OPENAI_MODEL") or "chat-latest"
-    base = (os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
+def _chat(prompt: str, key: str, base: str, model: str) -> tuple[str, str]:
+    """OpenAI 相容格式（OpenAI、Grok、DeepSeek…都適用）。"""
+    base = base.rstrip("/")
     r = requests.post(f"{base}/chat/completions", timeout=120,
                       headers={"authorization": f"Bearer {key}", "content-type": "application/json"},
                       json={"model": model, "messages": [{"role": "user", "content": prompt}]})
@@ -73,8 +74,19 @@ def _openai(prompt: str, key: str) -> tuple[str, str]:
     return r.json()["choices"][0]["message"]["content"].strip(), model
 
 
+def _grok(prompt: str, key: str) -> tuple[str, str]:
+    return _chat(prompt, key, os.environ.get("XAI_BASE_URL") or "https://api.x.ai/v1",
+                 os.environ.get("XAI_MODEL") or "grok-4.7")
+
+
+def _openai(prompt: str, key: str) -> tuple[str, str]:
+    return _chat(prompt, key, os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1",
+                 os.environ.get("OPENAI_MODEL") or "chat-latest")
+
+
 def generate(out: dict, brief: dict) -> dict | None:
-    providers = [("Gemini", "GEMINI_API_KEY", _gemini), ("OpenAI", "OPENAI_API_KEY", _openai)]
+    providers = [("Grok", "XAI_API_KEY", _grok), ("Gemini", "GEMINI_API_KEY", _gemini),
+                 ("OpenAI", "OPENAI_API_KEY", _openai)]
     prompt = PROMPT.format(market=out["name"], data=json.dumps(brief, ensure_ascii=False))
     for name, env, fn in providers:
         key = os.environ.get(env, "").strip()

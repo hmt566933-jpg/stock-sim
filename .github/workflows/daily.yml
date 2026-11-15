@@ -53,6 +53,8 @@ jobs:
       - name: 跑模擬
         env:
           # 選用：在 Settings → Secrets and variables → Actions 設定其中一家的金鑰，就會產生 AI 分析
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          XAI_MODEL: ${{ vars.XAI_MODEL }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}

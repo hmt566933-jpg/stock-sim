@@ -32,6 +32,7 @@
 
 | Secret 名稱 | 服務 | 預設模型（可改） |
 |---|---|---|
+| `XAI_API_KEY` | xAI Grok | `grok-4.7`（Variables 設 `XAI_MODEL` 可換） |
 | `GEMINI_API_KEY` | Google Gemini | `gemini-flash-latest`（Variables 設 `GEMINI_MODEL` 可換） |
 | `OPENAI_API_KEY` | OpenAI | `chat-latest`（Variables 設 `OPENAI_MODEL` 可換） |
 
