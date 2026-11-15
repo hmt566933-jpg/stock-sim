@@ -42,6 +42,7 @@ def facts(out: dict) -> dict:
 # 都沒設定時不產生分析。
 import json
 import os
+import time
 
 import requests
 
@@ -61,7 +62,7 @@ def _gemini(prompt: str, key: str) -> tuple[str, str]:
     model = os.environ.get("GEMINI_MODEL") or "gemini-flash-latest"
     r = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
                       headers={"x-goog-api-key": key, "content-type": "application/json"},
-                      json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=120)
+                      json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=(30, 360))
     if r.status_code >= 400:
         raise RuntimeError(f"HTTP {r.status_code}：{r.text[:300]}")
     parts = r.json()["candidates"][0]["content"]["parts"]
@@ -71,7 +72,8 @@ def _gemini(prompt: str, key: str) -> tuple[str, str]:
 def _chat(prompt: str, key: str, base: str, model: str) -> tuple[str, str]:
     """OpenAI 相容格式（OpenAI、Grok、DeepSeek…都適用）。"""
     base = base.rstrip("/")
-    r = requests.post(f"{base}/chat/completions", timeout=120,
+    # 推理型模型（例如 Grok）可能要想好幾分鐘，連線 30 秒、等回覆最多 6 分鐘
+    r = requests.post(f"{base}/chat/completions", timeout=(30, 360),
                       headers={"authorization": f"Bearer {key}", "content-type": "application/json"},
                       json={"model": model, "messages": [{"role": "user", "content": prompt}]})
     if r.status_code >= 400:  # 把服務回的錯誤原因印出來，方便除錯（不含金鑰）
@@ -98,10 +100,13 @@ def generate(out: dict, brief: dict) -> dict | None:
         if not key:
             continue
         print(f"[AI] 使用 {name} 產生分析…")
-        try:
-            text, model = fn(prompt, key)
-            if text:
-                return dict(provider=name, model=model, text=text)
-        except Exception as exc:
-            print(f"[警告] {name} 分析失敗：{exc}")
+        for attempt in (1, 2):  # 失敗重試一次
+            try:
+                t0 = time.time()
+                text, model = fn(prompt, key)
+                print(f"[AI] {name} 完成，用時 {time.time() - t0:.0f} 秒")
+                if text:
+                    return dict(provider=name, model=model, text=text)
+            except Exception as exc:
+                print(f"[警告] {name} 分析失敗（第 {attempt} 次）：{exc}")
     return None
