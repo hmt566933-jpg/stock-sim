@@ -87,7 +87,12 @@
   .bars { display: grid; grid-template-columns: minmax(6.5em, 32%) 1fr auto; gap: 6px 8px; align-items: center; font-size: 13px; }
   .bars .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; line-height: 1.25; }
   .bars .num small { display: block; color: var(--text-muted); font-size: 11px; }
-  .bars .lbl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bars .lbl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3; }
+  .bars .lbl small { font-size: 11px; padding-left: 19px; }
+  .wrow { display: contents; }
+  .wtr td:nth-child(2), .wtr th:nth-child(2) { text-align: left; }
+  .wrow.click > div { cursor: pointer; }
+  .wtr { grid-column: 1 / -1; background: var(--surface-0); border-radius: 8px; padding: 4px 8px; margin: -2px 0 6px; }
   .track { position: relative; height: 26px; }
   .track .zero { position: absolute; left: 50%; top: 0; bottom: 0; border-left: 1px solid var(--text-muted); }
   .track .bar { position: absolute; top: 5px; height: 16px; border-radius: 4px; }
@@ -130,7 +135,7 @@
       <h2>每週損益比較</h2>
       <div class="wnav"><button id="wprev" aria-label="上一週">‹</button><b id="wlabel"></b><button id="wnext" aria-label="下一週">›</button></div>
       <div class="bars" id="wbars"></div>
-      <p class="note">損益＝該週淨值變化（含持股未實現損益，已扣手續費與稅）。每個策略起始資金相同。</p>
+      <p class="note">損益＝該週淨值變化（含持股未實現損益，已扣手續費與稅）。每個策略起始資金相同。點策略可展開該週交易明細。</p>
       <div id="wtrades"></div>
     </section>
     <section class="card">
@@ -378,24 +383,29 @@ function drawWeekly(d) {
   // 該週損益長條圖（依報酬排序）
   const rows = d.strategies.map(s => ({ s, v: s.weekly[wi] }));  // 固定順序，不隨每週排名跳動
   const maxAbs = Math.max(0.5, ...rows.map(r => Math.abs(r.v.ret)));
+  // 長條圖＋交易明細合併：點策略那一列就展開該週的買賣
+  state.openW = state.openW || new Set();
   $("wbars").innerHTML = rows.map(({ s, v }) => {
     const half = Math.abs(v.ret) / maxAbs * 50;
     const up = v.ret >= 0;
     const bar = up ? `left:50%;width:${half}%` : `left:${50 - half}%;width:${half}%`;
-    return `<div class="lbl"><i class="key ${keyCls(s.key)}" style="border-color:${color(s.key)}"></i>${s.label}</div>
-      <div class="track"><div class="zero"></div>
-        <div class="bar" style="${bar};background:var(${up ? "--up" : "--down"})"></div></div>
-      <div class="num"><span class="${up ? "pos" : "neg"}">${v.ret > 0 ? "+" : ""}${v.ret.toFixed(2)}%</span><small>${fmtMoney(v.pnl)}</small></div>`;
-  }).join("");
-
-  // 最近一週的交易明細
-  if (wi === last) {
-    $("wtrades").innerHTML = d.strategies.filter(s => s.week_trades && s.week_trades.length).map(s =>
-      `<details><summary>${s.label}：本週 ${s.week_trades.length} 筆交易</summary><div class="scroll"><table>
+    const tr = wi === last ? (s.week_trades || []) : null;
+    const can = tr && tr.length, open = can && state.openW.has(s.key);
+    const sub = tr == null ? "" : `<small class="muted">${tr.length ? `${tr.length} 筆交易 ${open ? "▾" : "▸"}` : "本週無交易"}</small>`;
+    const detail = open ? `<div class="wtr"><div class="scroll"><table>
         <tr><th>日期</th><th>股票</th><th>買賣</th><th>股數</th><th>價格</th><th>已實現損益</th></tr>` +
-      s.week_trades.map(t => `<tr><td>${md(t.date)}</td><td>${stock(t.symbol)}</td><td>${t.side}</td><td>${fmtNum(t.qty)}</td><td>${fmtNum(t.price)}</td><td>${t.pnl == null ? "–" : fmtMoney(t.pnl)}</td></tr>`).join("") +
-      `</table></div></details>`).join("");
-  } else $("wtrades").innerHTML = "";
+      tr.map(t => `<tr><td>${md(t.date)}</td><td>${stock(t.symbol)}</td><td>${t.side}</td><td>${fmtNum(t.qty)}</td><td>${fmtNum(t.price)}</td><td>${t.pnl == null ? "–" : fmtMoney(t.pnl)}</td></tr>`).join("") +
+      `</table></div></div>` : "";
+    return `<div class="wrow ${can ? "click" : ""}" data-k="${s.key}">
+        <div class="lbl"><i class="key ${keyCls(s.key)}" style="border-color:${color(s.key)}"></i>${s.label}${sub ? "<br>" + sub : ""}</div>
+        <div class="track"><div class="zero"></div><div class="bar" style="${bar};background:var(${up ? "--up" : "--down"})"></div></div>
+        <div class="num"><span class="${up ? "pos" : "neg"}">${v.ret > 0 ? "+" : ""}${v.ret.toFixed(2)}%</span><small>${fmtMoney(v.pnl)}</small></div>
+      </div>${detail}`;
+  }).join("");
+  $("wbars").querySelectorAll(".wrow.click").forEach(r => r.onclick = () => {
+    const k = r.dataset.k; state.openW.has(k) ? state.openW.delete(k) : state.openW.add(k); drawWeekly(d);
+  });
+  $("wtrades").innerHTML = wi === last ? "" : '<p class="note">交易明細只保留最近一週。</p>';
 
   // 下週展望（Python 端用過去 52 週估計好的結果）
   const fc = d.strategies.filter(s => s.forecast && s.forecast.next).map(s => {
