@@ -84,8 +84,19 @@ def _used_symbols(results: list[dict]) -> set[str]:
     return used
 
 
+def _previous_payload() -> dict:
+    """沿用上一版儀表板裡的資料，避免某個市場這次沒跑就從頁面消失。"""
+    try:
+        html = (DOCS / "index.html").read_text(encoding="utf-8")
+        start = html.index("const DATA = ") + len("const DATA = ")
+        data, _ = json.JSONDecoder().raw_decode(html[start:])
+        return data or {}
+    except Exception:
+        return {}
+
+
 def build_dashboard() -> None:
-    payload = {}
+    payload = _previous_payload()
     for f in sorted((DOCS / "data").glob("*.json")):
         payload[f.stem] = json.loads(f.read_text(encoding="utf-8"))
     template = (ROOT / "simtrade" / "dashboard.html").read_text(encoding="utf-8")
