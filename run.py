@@ -176,6 +176,16 @@ def build_dashboard() -> None:
     html = template.replace("/*__DATA__*/null", json.dumps(payload, ensure_ascii=False))
     (DOCS / "index.html").write_text(html, encoding="utf-8")
     (DOCS / ".nojekyll").touch()
+    # 主畫面圖示（iOS「加入主畫面」、Android 安裝）
+    import shutil
+    for f in (ROOT / "simtrade" / "assets").glob("*.png"):
+        shutil.copy(f, DOCS / f.name)
+    (DOCS / "manifest.webmanifest").write_text(json.dumps(dict(
+        name="策略模擬倉", short_name="模擬倉", start_url="./", display="standalone",
+        background_color="#1e1b4b", theme_color="#1e1b4b",
+        icons=[dict(src="icon-192.png", sizes="192x192", type="image/png"),
+               dict(src="icon-512.png", sizes="512x512", type="image/png", purpose="any maskable")],
+    ), ensure_ascii=False), encoding="utf-8")
 
 
 def main() -> None:
