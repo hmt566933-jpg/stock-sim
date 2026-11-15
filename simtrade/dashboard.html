@@ -495,7 +495,10 @@ function drawWeekly(d) {
     const detail = open ? `<div class="wtr"><div class="scroll"><table>
         <tr><th>日期</th><th>股票</th><th>買賣</th><th>股數</th><th>價格</th><th>已實現損益</th></tr>` +
       tr.map(t => `<tr><td>${md(t.date)}</td><td>${stock(t.symbol)}</td><td>${t.side}</td><td>${fmtNum(t.qty)}</td><td>${fmtNum(t.price)}</td><td>${t.pnl == null ? "–" : fmtMoney(t.pnl)}</td></tr>`).join("") +
-      `</table></div></div>` : "";
+      `</table></div>${(() => {
+        const realized = tr.reduce((a, t) => a + (t.pnl || 0), 0);
+        return `<p class="note" style="margin:8px 4px 4px">本週損益 <b>${fmtMoney(v.pnl)}</b> ＝ 賣出的已實現損益 ${fmtMoney(realized)} ＋ 其他持股價值變化 ${fmtMoney(v.pnl - realized)}。<br>
+          「已實現損益」是賣出價和當初買進成本相比，包含之前幾週就已經發生的漲跌，所以和本週損益不會一樣。</p>`; })()}</div>` : "";
     return `<div class="wrow ${can ? "click" : ""}" data-k="${s.key}">
         <div class="lbl"><i class="key ${keyCls(s.key)}" style="border-color:${color(s.key)}"></i>${s.label}${sub ? "<br>" + sub : ""}</div>
         <div class="track"><div class="zero"></div><div class="bar" style="${bar};background:var(${up ? "--up" : "--down"})"></div></div>
