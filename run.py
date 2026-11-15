@@ -92,7 +92,34 @@ def run_market(key: str, cfg: dict, offline: bool = False, long: pd.DataFrame | 
         pkg["follow_log"] = follow_log  # 完整紀錄（約數百筆，很小）
         results.append(pkg)
 
+    # 其他資金分配方式：所有策略各跑一次，只保留每週損益頁需要的資料（網頁才不會太大）
+    def light(pkg):
+        return {k: pkg[k] for k in ("key", "label", "weekly", "week_trades", "stats")}
+
+    views = {}
+    for sz in cfg.get("sizing_views", []):
+        if sz == "equal":
+            continue
+        vraw, vres = {"benchmark": raw["benchmark"]}, [light(results[0])]
+        for name, scfg in cfg["strategies"].items():
+            st = strategies.build(name, {**scfg, "sizing": sz}, defaults)
+            r = engine.run(st, wide, elig, m["initial_cash"], costs, execution=execution,
+                           band=cfg.get("rebalance_band", 0.02))
+            vraw[name] = dict(label=st.label, equity=r["equity"], weights=r["weights"])
+            vres.append(light(package(name, st, r)[1]))
+        if fcfg:
+            fw, _ = follow.build_weights(vraw, wide["close"].index, fcfg.get("pick", "med"),
+                                         exclude=tuple(fcfg.get("exclude", [])))
+            params = {k: v for k, v in fcfg.items() if k in ("stop_loss", "take_profit", "entry_dip")}
+            fs = strategies.Fixed(fw, label=fcfg.get("label", "展望跟單"), **params)
+            vres.append(light(package("follow", fs, engine.run(fs, wide, elig, m["initial_cash"], costs,
+                                                                execution=execution))[1]))
+        views[sz] = vres
+        best = max(vres[1:], key=lambda x: x["stats"]["total_return"])
+        print(f"[{m['name']}] {sz} 分配：最佳 {best['label']} {best['stats']['total_return']}%")
+
     out = dict(
+        sizing_views=views,
         market=key, name=m["name"], currency=m["currency"], initial_cash=m["initial_cash"],
         start=str(wide["close"].index[0].date()), last_date=str(wide["close"].index[-1].date()),
         updated_at=datetime.now(TPE).strftime("%Y-%m-%d %H:%M"),
@@ -105,7 +132,7 @@ def run_market(key: str, cfg: dict, offline: bool = False, long: pd.DataFrame | 
         follow_cfg=cfg.get("outlook_follow"),
         market_filter=_filter_state(wide["close"], m["benchmark"], mf),
         weeks=weeks, max_positions=k, exits=cfg.get("exits", {}), strategies=results,
-        names={s: names.get(s, "") for s in _used_symbols(results)},
+        names={s: names.get(s, "") for s in _used_symbols(results, views)},
     )
     out["ai_brief"] = analysis.facts(out)
     out["analysis"] = analysis.generate(out, out["ai_brief"])
@@ -147,13 +174,16 @@ def _filter_state(close: pd.DataFrame, bench: str, mf: dict | None) -> dict | No
                 on=bool(b.iloc[-1] > ma.iloc[-1]))
 
 
-def _used_symbols(results: list[dict]) -> set[str]:
+def _used_symbols(results: list[dict], extra_views: dict | None = None) -> set[str]:
     used = set()
     for r in results:
         used |= {p["symbol"] for p in r["positions"]}
         used |= {p["symbol"] for p in r["pending"]}
         used |= {t["symbol"] for t in r["recent_trades"]}
         used |= {t["symbol"] for t in r.get("week_trades", [])}
+    for view in (extra_views or {}).values():
+        for r in view:
+            used |= {t["symbol"] for t in r.get("week_trades", [])}
     return used
 
 

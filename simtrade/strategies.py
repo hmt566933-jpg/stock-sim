@@ -136,7 +136,7 @@ class Strategy:
         self.max_hold, self.stop_loss, self.take_profit = max_hold_days, stop_loss, take_profit
         self.market_filter = market_filter  # {"symbol": "0050.TW", "ma": 20} 或 None（不使用）
         self.entry_dip = entry_dip          # 限價進場：比前一天收盤低多少才買（0.02 = 2%），None = 開盤直接買
-        self.sizing = sizing                # 資金分配："equal" 平均、"vol" 依波動度、"signal" 依訊號強弱（週動能類）
+        self.sizing = sizing                # 資金分配："equal" 平均、"vol" 依波動度、"signal" 依訊號強弱
         self.params = params
 
     def p(self, name, default):
@@ -155,6 +155,9 @@ class Strategy:
         w = select(entry, keep, self.k, close, self.max_hold, self.stop_loss, self.take_profit)
         if self.sizing == "vol":
             w = resize(w, inv_vol(close), self.k)
+        elif self.sizing == "signal":
+            # 進場當天在所有候選股中的排名（越強越高），持有期間沿用進場時的分數
+            w = resize(w, entry.rank(axis=1, pct=True).ffill(), self.k)
         return w
 
     def target_weights(self, wide: dict, eligible: pd.DataFrame) -> pd.DataFrame:

@@ -154,6 +154,8 @@
   </div>
 
   <div data-page="week">
+    <div class="seg" id="sizing" style="margin:0 0 6px"></div>
+    <p class="note" id="sizingnote" style="margin:0 0 12px"></p>
     <section class="card" id="wcard">
       <h2>每週損益比較</h2>
       <div class="wnav"><button id="wprev" aria-label="上一週">‹</button><b id="wlabel"></b><button id="wnext" aria-label="下一週">›</button></div>
@@ -281,7 +283,7 @@ const keyCls = k => k === "benchmark" ? "dash" : (SLOT[k] || 0) >= 8 ? "dot" : "
 const dashArr = k => k === "benchmark" ? 'stroke-dasharray="5 4"' : (SLOT[k] || 0) >= 8 ? 'stroke-dasharray="1.5 3" stroke-linecap="round"' : "";
 const RANGES = [["全部", null], ["1年", 365], ["3個月", 91], ["1個月", 31], ["1週", 7]];
 const TABS = ["ai", "week", "next", "total", "hold", "my"];
-let state = { market: Object.keys(DATA)[0], range: null, shown: {}, week: null, wn: 12,
+let state = { market: Object.keys(DATA)[0], range: null, shown: {}, week: null, wn: 12, sizing: "equal",
               tab: TABS.includes(location.hash.slice(1)) ? location.hash.slice(1) : "ai" };
 document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => {
   state.tab = b.dataset.tab; history.replaceState(null, "", "#" + state.tab); render(); window.scrollTo(0, 0);
@@ -459,6 +461,15 @@ function drawWeekly(d) {
   const ok = weeks.length && d.strategies.every(s => s.weekly);
   document.querySelectorAll('[data-page="week"] .card, [data-page="next"] .card').forEach(c => c.style.display = ok ? "" : "none");  // 舊資料還沒有週損益時先隱藏
   if (!ok) return;
+  // 每週損益頁的子分頁：平均／訊號加權／波動加權
+  const views = d.sizing_views || {};
+  const VIEWS = [["平均分配", "equal"], ["訊號加權", "signal"], ["波動加權", "vol"]].filter(([, k]) => k === "equal" || views[k]);
+  if (!VIEWS.some(([, k]) => k === state.sizing)) state.sizing = "equal";
+  seg($("sizing"), VIEWS, state.sizing, v => { state.sizing = v; state.openW = new Set(); drawWeekly(d); });
+  $("sizing").style.display = VIEWS.length > 1 ? "" : "none";
+  $("sizingnote").textContent = { equal: "每檔 10% 資金。", signal: "訊號越強（進場時排名越前面、動能越大）分越多資金，單檔最多 20%。",
+    vol: "波動越小分越多資金，讓每檔風險差不多，單檔最多 20%。" }[state.sizing];
+  const L = state.sizing === "equal" ? d.strategies : views[state.sizing];
   const last = weeks.length - 1;
   const wi = state.week == null ? last : Math.min(state.week, last);
   const w = weeks[wi];
@@ -468,7 +479,7 @@ function drawWeekly(d) {
   $("wnext").onclick = () => { state.week = wi + 1; render(); };
 
   // 該週損益長條圖（依報酬排序）
-  const rows = d.strategies.map(s => ({ s, v: s.weekly[wi] }));  // 固定順序，不隨每週排名跳動
+  const rows = L.map(s => ({ s, v: s.weekly[wi] }));  // 固定順序，不隨每週排名跳動
   const maxAbs = Math.max(0.5, ...rows.map(r => Math.abs(r.v.ret)));
   // 長條圖＋交易明細合併：點策略那一列就展開該週的買賣
   state.openW = state.openW || new Set();
@@ -537,8 +548,8 @@ function drawWeekly(d) {
   // 近 N 週統計
   seg($("wn"), [["4週", 4], ["12週", 12], ["26週", 26], ["52週", 52]], state.wn, v => { state.wn = v; render(); });
   const n = Math.min(state.wn, weeks.length), from = weeks.length - n;
-  const bench = d.strategies.find(s => s.key === "benchmark");
-  const stats = d.strategies.map(s => {
+  const bench = L.find(s => s.key === "benchmark");
+  const stats = L.map(s => {
     const ws = s.weekly.slice(from);
     const rets = ws.map(x => x.ret);
     const beat = bench && s !== bench ? ws.filter((x, i) => x.ret > bench.weekly[from + i].ret).length : null;
@@ -555,9 +566,9 @@ function drawWeekly(d) {
   // 逐週熱度表（最近的週在左邊）
   const cols = [];
   for (let i = last; i >= Math.max(0, weeks.length - Math.max(n, 4)); i--) cols.push(i);
-  const scale = Math.max(1, ...d.strategies.flatMap(s => cols.map(i => Math.abs(s.weekly[i].ret))));
+  const scale = Math.max(1, ...L.flatMap(s => cols.map(i => Math.abs(s.weekly[i].ret))));
   $("wheat").innerHTML = `<tr><th>策略</th>${cols.map(i => `<th class="wk ${i === wi ? "sel" : ""}" data-i="${i}">${md(weeks[i].start)}</th>`).join("")}</tr>` +
-    d.strategies.map(s => `<tr><td><i class="key ${keyCls(s.key)}" style="border-color:${color(s.key)}"></i>${s.label}</td>` +
+    L.map(s => `<tr><td><i class="key ${keyCls(s.key)}" style="border-color:${color(s.key)}"></i>${s.label}</td>` +
       cols.map(i => { const v = s.weekly[i].ret, a = Math.round(Math.min(1, Math.abs(v) / scale) * 55);
         return `<td class="${i === wi ? "sel" : ""}" style="background:color-mix(in srgb, var(${v >= 0 ? "--up" : "--down"}) ${a}%, transparent)">${v > 0 ? "+" : ""}${v.toFixed(1)}</td>`; }).join("") + "</tr>").join("");
   $("wheat").querySelectorAll("th.wk").forEach(th => th.onclick = () => { state.week = +th.dataset.i; render(); });
