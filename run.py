@@ -89,7 +89,7 @@ def run_market(key: str, cfg: dict, offline: bool = False, long: pd.DataFrame | 
         fs = strategies.Fixed(fw, label=fcfg.get("label", "展望跟單"), **params)
         r = engine.run(fs, wide, elig, m["initial_cash"], costs, execution=execution)
         weeks, pkg = package("follow", fs, r)
-        pkg["follow_log"] = follow_log[-12:]
+        pkg["follow_log"] = follow_log  # 完整紀錄（約數百筆，很小）
         results.append(pkg)
 
     out = dict(
