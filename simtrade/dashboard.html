@@ -65,6 +65,12 @@
   .muted { color: var(--text-muted); font-size: 13px; }
   .pill { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 99px; border: 1px solid var(--border); margin: 2px 4px 2px 0; }
   .note { font-size: 12px; color: var(--text-muted); }
+  .tabs { position: sticky; top: 0; z-index: 3; display: flex; gap: 4px; background: var(--surface-0);
+          border-bottom: 1px solid var(--border); margin: 0 -16px 14px; padding: 6px 16px 0; overflow-x: auto; }
+  .tabs button { border: 0; background: none; color: var(--text-secondary); font: inherit; font-size: 15px;
+                 padding: 8px 12px 10px; cursor: pointer; white-space: nowrap; border-bottom: 2px solid transparent; }
+  .tabs button[aria-selected="true"] { color: var(--text-primary); font-weight: 600; border-bottom-color: var(--text-primary); }
+  [data-page][hidden] { display: none; }
   .wnav { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
   .wnav button { border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary);
                  border-radius: 8px; width: 34px; height: 30px; font-size: 16px; cursor: pointer; }
@@ -94,52 +100,71 @@
     <div class="seg" id="mkt"></div>
   </div>
 
-  <section class="card" id="wcard">
-    <h2>每週損益比較</h2>
-    <div class="wnav"><button id="wprev" aria-label="上一週">‹</button><b id="wlabel"></b><button id="wnext" aria-label="下一週">›</button></div>
-    <div class="bars" id="wbars"></div>
-    <p class="note">損益＝該週淨值變化（含持股未實現損益，已扣手續費與稅）。每個策略起始資金相同。</p>
-    <div id="wtrades"></div>
+  <nav class="tabs" id="tabs">
+    <button data-tab="week">每週損益</button>
+    <button data-tab="next">下週展望</button>
+    <button data-tab="total">累積績效</button>
+    <button data-tab="hold">持倉</button>
+  </nav>
 
-    <h3 id="wfhead">下週展望</h3>
-    <p class="note" style="margin:0 0 8px">根據各策略過去 52 週的週報酬分布估計，不是保證。股價無法準確預測，請當作「這個策略通常會怎樣」的參考。</p>
-    <div class="scroll"><table id="wfcst"></table></div>
-    <div id="wplan"></div>
+  <div data-page="week">
+    <section class="card" id="wcard">
+      <h2>每週損益比較</h2>
+      <div class="wnav"><button id="wprev" aria-label="上一週">‹</button><b id="wlabel"></b><button id="wnext" aria-label="下一週">›</button></div>
+      <div class="bars" id="wbars"></div>
+      <p class="note">損益＝該週淨值變化（含持股未實現損益，已扣手續費與稅）。每個策略起始資金相同。</p>
+      <div id="wtrades"></div>
+    </section>
+    <section class="card">
+      <h2>近幾週統計</h2>
+      <div class="seg" id="wn" style="margin-bottom:8px"></div>
+      <div class="scroll"><table id="wstats"></table></div>
+    </section>
+    <section class="card">
+      <h2>逐週損益（%）</h2>
+      <div class="scroll"><table class="heat" id="wheat"></table></div>
+      <p class="note">點週次可切換上方的週損益圖。</p>
+    </section>
+  </div>
 
-    <h3>展望準確度（近 26 週）</h3>
-    <p class="note" style="margin:0 0 8px">每一週都只用「當時已知」的資料做預估，再和那週實際結果比對。方向命中 50% 左右＝跟丟銅板差不多；範圍設計上約 80% 會落在內。</p>
-    <div class="scroll"><table id="wacc"></table></div>
-    <div id="wacchist"></div>
-    <p class="note">⚠︎＝實際結果超出常見範圍。</p>
+  <div data-page="next">
+    <section class="card">
+      <h2 id="wfhead">下週展望</h2>
+      <p class="note" style="margin:0 0 8px">根據各策略過去 52 週的週報酬分布估計，不是保證。股價無法準確預測，請當作「這個策略通常會怎樣」的參考。</p>
+      <div class="scroll"><table id="wfcst"></table></div>
+      <div id="wplan"></div>
+    </section>
+    <section class="card">
+      <h2>展望準確度（近 26 週）</h2>
+      <p class="note" style="margin:0 0 8px">每一週都只用「當時已知」的資料做預估，再和那週實際結果比對。方向命中 50% 左右＝跟丟銅板差不多；範圍設計上約 80% 會落在內。</p>
+      <div class="scroll"><table id="wacc"></table></div>
+      <div id="wacchist"></div>
+      <p class="note">⚠︎＝實際結果超出常見範圍。</p>
+    </section>
+  </div>
 
-    <h3>近幾週統計</h3>
-    <div class="seg" id="wn" style="margin-bottom:8px"></div>
-    <div class="scroll"><table id="wstats"></table></div>
+  <div data-page="total">
+    <section class="card">
+      <h2>淨值走勢（區間起點 = 100）</h2>
+      <div class="seg" id="rng" style="margin:0 0 8px"></div>
+      <p class="note" style="margin:0 0 8px">點策略名稱可以顯示／隱藏線條</p>
+      <div class="legend" id="legend"></div>
+      <div id="chart"><div class="tip" id="tip"></div></div>
+    </section>
+    <section class="card">
+      <h2>策略排名</h2>
+      <div class="scroll"><table id="rank"></table></div>
+      <p class="note">「區間報酬」跟著上方時間範圍；其餘欄位為整個模擬期間。成本已含手續費與證交稅。</p>
+    </section>
+  </div>
 
-    <h3>逐週損益（%）</h3>
-    <div class="scroll"><table class="heat" id="wheat"></table></div>
-    <p class="note">點週次可切換上方的週損益圖。</p>
-  </section>
-
-  <section class="card">
-    <h2>淨值走勢（區間起點 = 100）</h2>
-    <div class="seg" id="rng" style="margin:0 0 8px"></div>
-    <p class="note" style="margin:0 0 8px">點策略名稱可以顯示／隱藏線條</p>
-    <div class="legend" id="legend"></div>
-    <div id="chart"><div class="tip" id="tip"></div></div>
-  </section>
-
-  <section class="card">
-    <h2>策略排名</h2>
-    <div class="scroll"><table id="rank"></table></div>
-    <p class="note">「區間報酬」跟著上方時間範圍；其餘欄位為整個模擬期間。成本已含手續費與證交稅。</p>
-  </section>
-
-  <section class="card">
-    <h2>各策略持倉與下一個交易日動作</h2>
-    <p class="note" style="margin:0 0 6px" id="exitnote"></p>
-    <div id="detail"></div>
-  </section>
+  <div data-page="hold">
+    <section class="card">
+      <h2>各策略持倉與下一個交易日動作</h2>
+      <p class="note" style="margin:0 0 6px" id="exitnote"></p>
+      <div id="detail"></div>
+    </section>
+  </div>
 
   <p class="note">規則：每天掃描整個股票池（排除近 20 日平均成交金額過低的股票），依各策略條件排名選股；收盤後產生訊號，下一個交易日開盤價成交。價格為還原權息後價格。股票池為目前上市櫃／成分股，不含已下市股票，歷史績效可能偏高。本頁為模擬結果，非投資建議。</p>
 </main>
@@ -152,7 +177,12 @@ Object.values(DATA).forEach(d => d.strategies.filter(s => s.key !== "benchmark")
   .forEach(s => { if (!(s.key in SLOT)) SLOT[s.key] = Object.keys(SLOT).length % 8 + 1; }));
 const color = k => k === "benchmark" ? "var(--bench)" : `var(--s${SLOT[k] || 1})`;
 const RANGES = [["全部", null], ["1年", 365], ["3個月", 91], ["1個月", 31], ["1週", 7]];
-let state = { market: Object.keys(DATA)[0], range: null, shown: {}, week: null, wn: 12 };
+const TABS = ["week", "next", "total", "hold"];
+let state = { market: Object.keys(DATA)[0], range: null, shown: {}, week: null, wn: 12,
+              tab: TABS.includes(location.hash.slice(1)) ? location.hash.slice(1) : "week" };
+document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => {
+  state.tab = b.dataset.tab; history.replaceState(null, "", "#" + state.tab); render(); window.scrollTo(0, 0);
+});
 // 預設只顯示總報酬前 3 名＋大盤，避免 9 條線擠在一起；點圖例可切換
 function defaultShown(d) {
   const top = [...d.strategies].filter(s => s.key !== "benchmark")
@@ -183,6 +213,9 @@ function sliceIdx(d) {
 
 function render() {
   const d = DATA[state.market];
+  // 分頁：先切換顯示，再畫圖（隱藏中的圖表量不到寬度）
+  document.querySelectorAll("#tabs button").forEach(b => b.setAttribute("aria-selected", String(b.dataset.tab === state.tab)));
+  document.querySelectorAll("[data-page]").forEach(p => p.hidden = p.dataset.page !== state.tab);
   $("meta").textContent = `${d.name}｜資料至 ${d.last_date}｜更新於 ${d.updated_at}（台北）｜股票池 ${fmtNum(d.universe_size)} 檔，今日可交易 ${fmtNum(d.eligible_today)} 檔｜每個策略最多持有 ${d.max_positions} 檔，起始資金 ${fmtNum(d.initial_cash)} ${d.currency}`;
   seg($("mkt"), Object.keys(DATA).map(k => [DATA[k].name, k]), state.market, v => { state.market = v; state.week = null; render(); });
   drawWeekly(d);
@@ -304,7 +337,7 @@ const fmtMoney = v => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(Math.round(v
 function drawWeekly(d) {
   const weeks = d.weeks || [];
   const ok = weeks.length && d.strategies.every(s => s.weekly);
-  $("wcard").style.display = ok ? "" : "none";  // 舊資料還沒有週損益時先隱藏
+  document.querySelectorAll('[data-page="week"] .card, [data-page="next"] .card').forEach(c => c.style.display = ok ? "" : "none");  // 舊資料還沒有週損益時先隱藏
   if (!ok) return;
   const last = weeks.length - 1;
   const wi = state.week == null ? last : Math.min(state.week, last);
