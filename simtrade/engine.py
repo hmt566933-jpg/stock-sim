@@ -18,6 +18,8 @@ def run(strategy: Strategy, wide: dict[str, pd.DataFrame], eligible: pd.DataFram
         initial_cash: float, costs: Costs, execution: str = "next_open", band: float = 0.02) -> dict:
     close = wide["close"]
     open_ = wide["open"]
+    low = wide.get("low")
+    dip = getattr(strategy, "entry_dip", None) or 0.0  # 限價進場：比前一天收盤低 dip 才買
     weights = strategy.target_weights(wide, eligible).reindex_like(close).fillna(0.0)
     w_arr = weights.to_numpy()
     cols = weights.columns
@@ -25,6 +27,10 @@ def run(strategy: Strategy, wide: dict[str, pd.DataFrame], eligible: pd.DataFram
 
     acct = Account(cash=float(initial_cash), costs=costs)
     equity = []
+    # 引擎層停利停損（展望跟單用；一般策略的停損在 select() 裡處理）
+    eng_exits = getattr(strategy, "engine_exits", False)
+    sl, tp = getattr(strategy, "stop_loss", None), getattr(strategy, "take_profit", None)
+    banned: set[str] = set()
     dates = close.index
 
     for i, dt in enumerate(dates):
@@ -39,6 +45,18 @@ def run(strategy: Strategy, wide: dict[str, pd.DataFrame], eligible: pd.DataFram
             exec_px = close.iloc[i]
         # 全市場有上千檔，只處理「想持有」或「已持有」的股票
         target = {cols[j]: float(row[j]) for j in np.flatnonzero(row > 0)}
+        if eng_exits and i > 0:
+            banned &= set(target)  # 跟隨的策略不再持有時解除封鎖
+            prev = close.iloc[i - 1]
+            for sym, q in acct.shares.items():
+                c = prev[sym]
+                if pd.isna(c):
+                    continue
+                r = float(c) * q / acct.cost_basis[sym] - 1
+                if (sl and r <= -sl) or (tp and r >= tp):
+                    banned.add(sym)
+            for sym in banned:
+                target.pop(sym, None)
         relevant = sorted(set(target) | set(acct.shares))  # 排序讓結果可重現
         mark_i = mark.iloc[i]
         prev_close = close.iloc[i - 1] if i > 0 else None
@@ -68,7 +86,20 @@ def run(strategy: Strategy, wide: dict[str, pd.DataFrame], eligible: pd.DataFram
         for sym, want in orders:
             held = acct.shares.get(sym, 0)
             if want > held:
-                acct.buy(dt, sym, want - held, px[sym], pc(sym))
+                price = px[sym]
+                if dip > 0 and held == 0 and execution == "next_open":
+                    ref = pc(sym)
+                    if ref is None:
+                        continue
+                    limit = ref * (1 - dip)
+                    day_low = float(low.iloc[i][sym]) if low is not None and pd.notna(low.iloc[i][sym]) else price
+                    if price <= limit:
+                        pass                      # 開盤就低於限價：用開盤價成交
+                    elif day_low <= limit:
+                        price = limit             # 盤中跌到限價：用限價成交
+                    else:
+                        continue                  # 沒跌到限價：今天買不到
+                acct.buy(dt, sym, want - held, price, pc(sym))
 
         equity.append(acct.market_value({s: mark_i[s] for s in acct.shares}))
 
@@ -79,7 +110,7 @@ def run(strategy: Strategy, wide: dict[str, pd.DataFrame], eligible: pd.DataFram
                       value=round(q * float(last[s]), 2),
                       pnl_pct=round((q * float(last[s]) / acct.cost_basis[s] - 1) * 100, 2))
                  for s, q in sorted(acct.shares.items())]
-    return dict(equity=eq, trades=acct.trades, positions=positions, cash=round(acct.cash, 2),
+    return dict(equity=eq, trades=acct.trades, positions=positions, cash=round(acct.cash, 2), weights=weights,
                 pending=_pending(weights.iloc[-1], acct, strategy, last))
 
 

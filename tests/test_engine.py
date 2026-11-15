@@ -113,8 +113,36 @@ def test_ai_brief():
     runner.DOCS = Path(__file__).resolve().parent / "_out"
     out = runner.run_market("tw", cfg, long=fake_long(syms, seed=3), names={s: s for s in syms})
     brief = out["ai_brief"]
-    assert brief["market"] == "台股" and len(brief["strategies"]) == 1 + len(cfg["strategies"])
+    assert brief["market"] == "台股" and len(brief["strategies"]) == 2 + len(cfg["strategies"])
     assert out["market_filter"] is not None
+
+
+def test_limit_entry():
+    """限價進場：開盤沒跌到限價、盤中跌到 → 用限價成交；沒跌到 → 不成交。"""
+    idx = pd.bdate_range("2024-01-01", periods=4)
+    wide = {k: pd.DataFrame({"A": v}, index=idx, dtype=float) for k, v in {
+        "open": [100, 100, 99, 97], "high": [101, 101, 100, 98], "low": [99, 99.5, 97.5, 96],
+        "close": [100, 100, 99, 97], "volume": [1e6] * 4}.items()}
+    class Always(strategies.Strategy):
+        def target_weights(self, wide, eligible):
+            return pd.DataFrame(1.0, index=wide["close"].index, columns=wide["close"].columns)
+    st = Always(entry_dip=0.02)
+    r = engine.run(st, wide, wide["close"].notna(), 10_000,
+                   Costs(fee_rate=0, min_fee=0, sell_tax_stock=0, price_limit=None))
+    buy = r["trades"][0]
+    assert buy["date"] == "2024-01-03" and abs(buy["price"] - 98.0) < 1e-9   # 第 2 天沒跌到，第 3 天盤中到 98
+
+
+def test_outlook_follow_picks_best():
+    from simtrade import follow
+    idx = pd.bdate_range("2023-01-02", periods=300)
+    up = pd.Series(np.linspace(100, 200, 300), index=idx)
+    flat = pd.Series(100.0, index=idx)
+    wA = pd.DataFrame({"X": 0.5, "Y": 0.0}, index=idx)
+    wB = pd.DataFrame({"X": 0.0, "Y": 0.5}, index=idx)
+    w, log = follow.build_weights({"a": dict(label="A", equity=up, weights=wA),
+                                   "b": dict(label="B", equity=flat, weights=wB)}, idx)
+    assert log[-1]["key"] == "a" and w["X"].iloc[-10:].gt(0).all() and (w["Y"] == 0).all()
 
 
 def test_round_trip_and_limits():
@@ -166,7 +194,7 @@ def test_full_pipeline(tmp=Path(__file__).resolve().parent / "_out"):
                 for t in s["recent_trades"]:
                     if t["side"] == "買" and t["symbol"].startswith("S"):
                         assert (int(t["symbol"][1:]) + 1) % 5 != 0, t
-        assert len(out["strategies"]) == 1 + len(cfg["strategies"])
+        assert len(out["strategies"]) == 2 + len(cfg["strategies"])  # 大盤 + 策略 + 展望跟單
         assert all(s["forecast"]["accuracy"]["weeks"] > 0 for s in out["strategies"])
         for s in out["strategies"]:
             assert s["equity"][0] == 100 and s["cash"] >= 0

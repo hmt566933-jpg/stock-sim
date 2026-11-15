@@ -72,6 +72,18 @@
   .ai h3:first-child { margin-top: 0; }
   .ai p { margin: 0 0 8px; line-height: 1.7; }
   .ai ul { margin: 0 0 8px; padding-left: 20px; line-height: 1.7; }
+  .mysum { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+  .mysum div { background: var(--surface-0); border-radius: 10px; padding: 10px 12px; }
+  .mysum small { display: block; color: var(--text-muted); font-size: 12px; }
+  .mysum b { font-size: 17px; font-variant-numeric: tabular-nums; }
+  .mysum input { width: 100%; font: inherit; font-size: 16px; border: 1px solid var(--border); border-radius: 6px; padding: 2px 6px; background: var(--surface-1); color: var(--text-primary); }
+  .form { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+  .form label { display: flex; flex-direction: column; font-size: 12px; color: var(--text-muted); gap: 4px; }
+  .form input, .form select, .px-in { font: inherit; font-size: 16px; padding: 7px 8px; border: 1px solid var(--border); border-radius: 8px;
+           background: var(--surface-1); color: var(--text-primary); width: 100%; }
+  .px-in { width: 90px; padding: 4px 6px; font-size: 14px; }
+  .btn { border: 0; background: var(--text-primary); color: var(--surface-1); font: inherit; padding: 8px 16px; border-radius: 8px; cursor: pointer; }
+  .linkbtn { border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary); border-radius: 6px; padding: 3px 8px; font: inherit; font-size: 12px; cursor: pointer; }
   .tabs { scrollbar-width: none; }
   .tabs::-webkit-scrollbar { display: none; }
   .tabs button { border: 0; background: none; color: var(--text-secondary); font: inherit; font-size: 14px;
@@ -120,6 +132,7 @@
     <button data-tab="next">下週展望</button>
     <button data-tab="total">累積績效</button>
     <button data-tab="hold">持倉</button>
+    <button data-tab="my">我的模擬倉</button>
   </nav>
 
   <div data-page="ai">
@@ -154,6 +167,7 @@
     <section class="card">
       <h2 id="wfhead">下週展望</h2>
       <p id="mfstate" style="margin:0 0 8px"></p>
+      <p id="followstate" style="margin:0 0 8px"></p>
       <p class="note" style="margin:0 0 8px">根據各策略過去 52 週的週報酬分布估計，不是保證。股價無法準確預測，請當作「這個策略通常會怎樣」的參考。</p>
       <div class="scroll"><table id="wfcst"></table></div>
       <div id="wplan"></div>
@@ -199,6 +213,49 @@
     </section>
   </div>
 
+  <div data-page="my">
+    <section class="card">
+      <h2>我的模擬倉</h2>
+      <div class="mysum" id="mysum"></div>
+      <p class="note">資料只存在這台裝置的瀏覽器裡（換手機或清除瀏覽器資料會不見），可用下方「匯出」備份。現價為最新收盤價。</p>
+    </section>
+
+    <section class="card">
+      <h2>下單</h2>
+      <div class="form">
+        <label>股票<input id="f_sym" list="symlist" placeholder="代號或名稱，例如 2330" autocomplete="off"></label>
+        <datalist id="symlist"></datalist>
+        <label>買賣<select id="f_side"><option>買</option><option>賣</option></select></label>
+        <label>股數<input id="f_qty" type="number" min="1" step="1" inputmode="numeric"></label>
+        <label>成交價<input id="f_px" type="number" min="0" step="0.01" inputmode="decimal"></label>
+        <label>日期<input id="f_date" type="date"></label>
+      </div>
+      <p class="muted" id="f_est" style="margin:8px 0"></p>
+      <button class="btn" id="f_add">加入交易</button> <span class="muted" id="f_msg"></span>
+    </section>
+
+    <section class="card">
+      <h2 id="sughead">建議單（展望跟單）</h2>
+      <p class="note" style="margin:0 0 8px" id="sugnote"></p>
+      <div class="scroll"><table id="sugtbl"></table></div>
+    </section>
+
+    <section class="card">
+      <h2>持股</h2>
+      <div class="scroll"><table id="myhold"></table></div>
+    </section>
+
+    <section class="card">
+      <h2>交易紀錄</h2>
+      <div class="scroll"><table id="mytrades"></table></div>
+      <div class="row" style="margin-top:12px">
+        <button class="chip" id="my_export">匯出備份</button>
+        <label class="chip" style="cursor:pointer">匯入備份<input type="file" id="my_import" accept=".json" hidden></label>
+        <button class="chip" id="my_clear">清空</button>
+      </div>
+    </section>
+  </div>
+
   <p class="note">規則：每天掃描整個股票池（排除近 20 日平均成交金額過低的股票），依各策略條件排名選股；收盤後產生訊號，下一個交易日開盤價成交。價格為還原權息後價格。股票池為目前上市櫃／成分股，不含已下市股票，歷史績效可能偏高。本頁為模擬結果，非投資建議。</p>
 </main>
 
@@ -213,7 +270,7 @@ const color = k => k === "benchmark" ? "var(--bench)" : `var(--s${(SLOT[k] || 0)
 const keyCls = k => k === "benchmark" ? "dash" : (SLOT[k] || 0) >= 8 ? "dot" : "";
 const dashArr = k => k === "benchmark" ? 'stroke-dasharray="5 4"' : (SLOT[k] || 0) >= 8 ? 'stroke-dasharray="1.5 3" stroke-linecap="round"' : "";
 const RANGES = [["全部", null], ["1年", 365], ["3個月", 91], ["1個月", 31], ["1週", 7]];
-const TABS = ["ai", "week", "next", "total", "hold"];
+const TABS = ["ai", "week", "next", "total", "hold", "my"];
 let state = { market: Object.keys(DATA)[0], range: null, shown: {}, week: null, wn: 12,
               tab: TABS.includes(location.hash.slice(1)) ? location.hash.slice(1) : "ai" };
 document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => {
@@ -260,6 +317,8 @@ function render() {
   drawWeekly(d);
   drawFilter(d);
   drawRegime(d);
+  drawFollow(d);
+  if (state.tab === "my") drawMy(d);
   drawAnalysis(d);
   $("copybrief").style.display = d.ai_brief ? "" : "none";
   if (!state.shown[state.market]) state.shown[state.market] = defaultShown(d);
@@ -515,6 +574,16 @@ function drawAnalysis(d) {
   $("aisrc").textContent = `${a.provider}（${a.model}）根據 ${d.last_date} 的資料撰寫，內容可能有誤，請以數字為準。`;
 }
 
+function drawFollow(d) {
+  const fs = d.strategies.find(s => s.key === "follow"), log = fs?.follow_log || [];
+  if (!log.length) { $("followstate").innerHTML = ""; return; }
+  const now = log[log.length - 1], hist = log.slice(-9, -1).reverse();
+  $("followstate").innerHTML = `<span class="pill">展望跟單 下週跟隨：${now.pick}</span>` +
+    (hist.length ? `<details><summary class="muted" style="font-weight:400">過去幾週跟了誰</summary><div class="scroll"><table>
+      <tr><th>週</th><th>跟隨策略</th><th>當時展望中位數</th></tr>` +
+      hist.map(h => `<tr><td>${md(h.week)}</td><td>${h.pick}</td><td>${fmtPct(h.score)}</td></tr>`).join("") + `</table></div></details>` : "");
+}
+
 function drawRegime(d) {
   const g = d.regime;
   $("regimecard").style.display = g && state.tab === "total" ? "" : "none";
@@ -530,6 +599,159 @@ function drawRegime(d) {
         <td>${be.win_days == null ? "–" : be.win_days + "%"}</td><td>${be.vol == null ? "–" : be.vol.toFixed(1) + "%"}</td></tr>`;
     }).join("");
   $("regnote").textContent = `判斷方式：前一天大盤收盤在 ${g.ma} 日均線之上＝牛市，之下＝熊市。模擬期間牛市 ${g.bull_days} 天、熊市 ${g.bear_days} 天（熊市樣本較少，年化數字波動大）。▲＝該市況下贏過大盤。淨值走勢圖的灰色底色＝熊市期間。`;
+}
+
+
+// ───────────── 我的模擬倉（存在瀏覽器 localStorage） ─────────────
+const myKey = mk => `stocksim_my_${mk}`;
+function myLoad(mk) {
+  try { const v = JSON.parse(localStorage.getItem(myKey(mk)) || "null"); if (v && Array.isArray(v.trades)) return v; } catch (e) {}
+  return { cash0: DATA[mk].initial_cash, trades: [] };
+}
+function mySave(mk, v) { try { localStorage.setItem(myKey(mk), JSON.stringify(v)); return true; } catch (e) { return false; } }
+
+function myCost(d, sym, side, qty, px) {
+  const c = d.costs || {}, val = qty * px;
+  const fee = c.fee_rate > 0 ? Math.max(c.min_fee || 0, val * c.fee_rate * (c.fee_discount ?? 1)) : 0;
+  const isEtf = c.etf_prefix && sym.startsWith(c.etf_prefix);
+  const tax = side === "賣" ? val * (isEtf ? c.sell_tax_etf : c.sell_tax_stock) : 0;
+  return { fee: Math.round(fee * 100) / 100, tax: Math.round(tax * 100) / 100 };
+}
+
+function myBook(d, my) {
+  const pos = {}, q = d.quotes || {};
+  let cash = my.cash0, realized = 0, fees = 0;
+  const trades = [...my.trades].sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
+  for (const t of trades) {
+    const p = pos[t.sym] || (pos[t.sym] = { qty: 0, cost: 0 });
+    fees += t.fee + t.tax;
+    if (t.side === "買") { cash -= t.qty * t.px + t.fee; p.qty += t.qty; p.cost += t.qty * t.px + t.fee; }
+    else {
+      const avg = p.qty ? p.cost / p.qty : 0, q2 = Math.min(t.qty, p.qty);
+      cash += t.qty * t.px - t.fee - t.tax; realized += t.qty * t.px - t.fee - t.tax - avg * q2;
+      p.cost -= avg * q2; p.qty -= q2;
+    }
+  }
+  const holds = Object.entries(pos).filter(([, p]) => p.qty > 0).map(([sym, p]) => {
+    const now = q[sym] ? q[sym][1] : p.cost / p.qty;
+    return { sym, qty: p.qty, avg: p.cost / p.qty, now, value: p.qty * now, pnl: p.qty * now - p.cost, pct: (p.qty * now / p.cost - 1) * 100 };
+  });
+  const mv = holds.reduce((a, h) => a + h.value, 0);
+  return { cash, holds, mv, total: cash + mv, realized, fees, first: trades[0]?.date };
+}
+
+function symFromInput(d, v) {
+  v = (v || "").trim(); if (!v) return null;
+  const q = d.quotes || {}, code = v.split(/\s+/)[0].toUpperCase();
+  for (const s of [code, code + ".TW", code + ".TWO"]) if (q[s]) return s;
+  const hit = Object.entries(q).find(([, x]) => x[0] && x[0] === v.split(/\s+/).slice(-1)[0]);
+  return hit ? hit[0] : null;
+}
+const symLabel = (d, s) => { const q = (d.quotes || {})[s]; const code = s.replace(/\.TWO?$/, ""); return q && q[0] ? `${code} ${q[0]}` : code; };
+
+let myInit = {};
+function drawMy(d) {
+  const mk = state.market, my = myLoad(mk), b = myBook(d, my), cur = d.currency;
+  // 下拉清單（每個市場只建一次）
+  if (myInit.list !== mk) {
+    $("symlist").innerHTML = Object.entries(d.quotes || {}).map(([s, x]) => `<option value="${symLabel(d, s)}">`).join("");
+    $("f_date").value = d.last_date; $("f_sym").value = ""; $("f_px").value = ""; $("f_qty").value = "";
+    myInit.list = mk;
+  }
+  // 同期大盤
+  let bench = "–";
+  if (b.first) {
+    const bs = d.strategies.find(s => s.key === "benchmark"), i0 = d.dates.findIndex(x => x >= b.first);
+    if (bs && i0 >= 0) bench = fmtPct((bs.equity[bs.equity.length - 1] / bs.equity[Math.max(0, i0 - 1)] - 1) * 100);
+  }
+  const ret = (b.total / my.cash0 - 1) * 100;
+  $("mysum").innerHTML = `
+    <div><small>起始資金（${cur}）</small><input id="my_cash0" type="number" value="${my.cash0}" min="0" step="1000"></div>
+    <div><small>總資產</small><b>${fmtNum(Math.round(b.total))}</b></div>
+    <div><small>總報酬</small><b>${fmtPct(ret)}</b></div>
+    <div><small>同期大盤</small><b>${bench}</b></div>
+    <div><small>現金</small><b>${fmtNum(Math.round(b.cash))}</b></div>
+    <div><small>持股市值</small><b>${fmtNum(Math.round(b.mv))}</b></div>
+    <div><small>已實現損益</small><b><span class="${b.realized > 0 ? "pos" : b.realized < 0 ? "neg" : ""}">${fmtMoney(b.realized)}</span></b></div>
+    <div><small>手續費＋稅</small><b>${fmtNum(Math.round(b.fees))}</b></div>`;
+  $("my_cash0").onchange = e => { my.cash0 = Math.max(0, +e.target.value || 0); mySave(mk, my); drawMy(d); };
+
+  $("myhold").innerHTML = b.holds.length ? `<tr><th>股票</th><th>股數</th><th>均價</th><th>現價</th><th>市值</th><th>損益</th><th>報酬</th><th></th></tr>` +
+    b.holds.map(h => `<tr><td>${symLabel(d, h.sym)}</td><td>${fmtNum(h.qty)}</td><td>${fmtNum(+h.avg.toFixed(2))}</td><td>${fmtNum(h.now)}</td>
+      <td>${fmtNum(Math.round(h.value))}</td><td><span class="${h.pnl > 0 ? "pos" : h.pnl < 0 ? "neg" : ""}">${fmtMoney(h.pnl)}</span></td><td>${fmtPct(h.pct)}</td>
+      <td><button class="linkbtn" data-sell="${h.sym}" data-q="${h.qty}" data-p="${h.now}">賣出</button></td></tr>`).join("")
+    : '<tr><td class="muted">目前沒有持股</td></tr>';
+  $("myhold").querySelectorAll("[data-sell]").forEach(x => x.onclick = () => fillForm(d, x.dataset.sell, "賣", +x.dataset.q, +x.dataset.p));
+
+  const ts = [...my.trades].sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
+  $("mytrades").innerHTML = ts.length ? `<tr><th>日期</th><th>股票</th><th>買賣</th><th>股數</th><th>成交價</th><th>費用</th><th></th></tr>` +
+    ts.map(t => `<tr><td>${t.date}</td><td>${symLabel(d, t.sym)}</td><td>${t.side}</td><td>${fmtNum(t.qty)}</td><td>${fmtNum(t.px)}</td>
+      <td>${fmtNum(Math.round(t.fee + t.tax))}</td><td><button class="linkbtn" data-del="${t.id}">刪除</button></td></tr>`).join("")
+    : '<tr><td class="muted">還沒有交易，從上方下單或帶入建議單開始</td></tr>';
+  $("mytrades").querySelectorAll("[data-del]").forEach(x => x.onclick = () => {
+    if (!confirm("刪除這筆交易？")) return;
+    my.trades = my.trades.filter(t => t.id !== +x.dataset.del); mySave(mk, my); drawMy(d);
+  });
+
+  // 建議單：展望跟單下個交易日的動作，股數依「我的總資產」換算
+  const fs = d.strategies.find(s => s.key === "follow"), k = d.max_positions || 10, dip = (d.follow_cfg?.entry_dip) || 0;
+  const pick = fs?.follow_log?.slice(-1)[0];
+  $("sughead").textContent = "建議單（展望跟單）";
+  $("sugnote").textContent = fs ? `目前跟隨：${pick ? pick.pick : "–"}。買進股數＝你的總資產 ÷ ${k} 檔 ÷ 價格；賣出只列出你有持股的。價格可以改成你想掛的價。` : "沒有展望跟單資料。";
+  const held = Object.fromEntries(b.holds.map(h => [h.sym, h.qty]));
+  const sug = (fs?.pending || []).map(p => {
+    const sell = p.action === "賣出" || p.action === "減碼";
+    const px = +(p.price * (sell ? 1 : 1 - dip)).toFixed(2);
+    const qty = sell ? (held[p.symbol] || 0) : Math.floor(b.total / k / px);
+    return { ...p, side: sell ? "賣" : "買", px, qty };
+  }).filter(p => p.qty > 0);
+  $("sugtbl").innerHTML = sug.length ? `<tr><th>股票</th><th>動作</th><th>股數</th><th>價格</th><th></th></tr>` +
+    sug.map((p, i) => `<tr><td>${symLabel(d, p.symbol)}</td><td>${p.side}</td><td>${fmtNum(p.qty)}</td>
+      <td><input class="px-in" type="number" step="0.01" value="${p.px}" data-i="${i}"></td>
+      <td><button class="linkbtn" data-take="${i}">帶入</button></td></tr>`).join("")
+    : '<tr><td class="muted">下個交易日沒有建議單（可能大盤濾網暫停進場）</td></tr>';
+  $("sugtbl").querySelectorAll("[data-take]").forEach(x => x.onclick = () => {
+    const i = +x.dataset.take, p = sug[i], px = +$("sugtbl").querySelector(`input[data-i="${i}"]`).value || p.px;
+    fillForm(d, p.symbol, p.side, p.qty, px);
+  });
+
+  // 下單表單
+  const est = () => {
+    const sym = symFromInput(d, $("f_sym").value), qty = +$("f_qty").value, px = +$("f_px").value, side = $("f_side").value;
+    if (!sym || !qty || !px) { $("f_est").textContent = sym ? `最新收盤 ${fmtNum(d.quotes[sym][1])}` : ""; return null; }
+    const c = myCost(d, sym, side, qty, px);
+    $("f_est").textContent = `${side} ${symLabel(d, sym)} ${fmtNum(qty)} 股 × ${fmtNum(px)} ＝ ${fmtNum(Math.round(qty * px))}，手續費 ${fmtNum(c.fee)}${side === "賣" ? `、證交稅 ${fmtNum(c.tax)}` : ""}`;
+    return { sym, qty, px, side, ...c };
+  };
+  $("f_sym").oninput = () => { const sym = symFromInput(d, $("f_sym").value); if (sym && !$("f_px").value) $("f_px").value = d.quotes[sym][1]; est(); };
+  ["f_qty", "f_px", "f_side"].forEach(id => $(id).oninput = est);
+  $("f_add").onclick = () => {
+    const o = est(); const msg = $("f_msg");
+    if (!o) { msg.textContent = "請填股票、股數和價格"; return; }
+    if (o.side === "賣" && (held[o.sym] || 0) < o.qty) { msg.textContent = `持股不足（目前 ${held[o.sym] || 0} 股）`; return; }
+    if (o.side === "買" && o.qty * o.px + o.fee > b.cash) { msg.textContent = "現金不足"; return; }
+    my.trades.push({ id: Date.now(), date: $("f_date").value || d.last_date, sym: o.sym, side: o.side, qty: o.qty, px: o.px, fee: o.fee, tax: o.tax });
+    mySave(mk, my) ? (msg.textContent = "已加入 ✓") : (msg.textContent = "這個瀏覽器無法儲存資料");
+    $("f_qty").value = ""; drawMy(d);
+  };
+  $("my_export").onclick = () => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(my, null, 1)], { type: "application/json" }));
+    a.download = `我的模擬倉_${d.name}_${d.last_date}.json`; a.click();
+  };
+  $("my_import").onchange = async e => {
+    try { const v = JSON.parse(await e.target.files[0].text()); if (!Array.isArray(v.trades)) throw 0;
+      if (confirm(`匯入 ${v.trades.length} 筆交易，會覆蓋目前的資料？`)) { mySave(mk, v); drawMy(d); } }
+    catch (err) { alert("檔案格式不對"); }
+    e.target.value = "";
+  };
+  $("my_clear").onclick = () => { if (confirm("清空這個市場的所有模擬交易？")) { mySave(mk, { cash0: my.cash0, trades: [] }); drawMy(d); } };
+}
+
+function fillForm(d, sym, side, qty, px) {
+  $("f_sym").value = symLabel(d, sym); $("f_side").value = side; $("f_qty").value = qty; $("f_px").value = px;
+  $("f_date").value = d.last_date; $("f_sym").dispatchEvent(new Event("input"));
+  $("f_add").scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
 function drawFilter(d) {

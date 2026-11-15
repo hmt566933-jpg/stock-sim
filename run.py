@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from simtrade import analysis, data, engine, forecast, metrics, regime, strategies, universe
+from simtrade import analysis, data, engine, follow, forecast, metrics, regime, strategies, universe
 from simtrade.broker import Costs
 
 ROOT = Path(__file__).resolve().parent
@@ -51,27 +51,46 @@ def run_market(key: str, cfg: dict, offline: bool = False, long: pd.DataFrame | 
 
     reg_state, reg_info = regime.summary(wide["close"][m["benchmark"]], m.get("regime_ma", 200))
 
-    results = []
-    for name, strat in strats:
-        r = engine.run(strat, wide, elig, m["initial_cash"], costs,
-                       execution=cfg.get("execution", "next_open"),
-                       band=cfg.get("rebalance_band", 0.02))
+    execution = cfg.get("execution", "next_open")
+
+    def package(name, strat, r):
         eq = r["equity"]
         all_weeks, all_rows = weekly(eq, m["initial_cash"], n=10_000)
-        fc = forecast.build([r["ret"] for r in all_rows], [w["done"] for w in all_weeks])
-        weeks, wrows = all_weeks[-52:], all_rows[-52:]
+        fc = forecast.build([x["ret"] for x in all_rows], [w["done"] for w in all_weeks])
+        weeks_, wrows = all_weeks[-52:], all_rows[-52:]
         # 保留最近 12 週的交易明細（再多會讓網頁太大、手機開很慢）
-        since = weeks[-TRADE_WEEKS]["start"] if len(weeks) >= TRADE_WEEKS else (weeks[0]["start"] if weeks else "")
-        week_trades = [t for t in r["trades"] if weeks and t["date"] >= since]
-        results.append(dict(
+        since = weeks_[-TRADE_WEEKS]["start"] if len(weeks_) >= TRADE_WEEKS else (weeks_[0]["start"] if weeks_ else "")
+        week_trades = [t for t in r["trades"] if weeks_ and t["date"] >= since]
+        return weeks_, dict(
             weekly=wrows, week_trades=week_trades[::-1], forecast=fc,
             key=name, label=strat.label, stats=metrics.summarize(eq, r["trades"]),
             regime=regime.split_returns(eq, reg_state),
             equity=[round(v / m["initial_cash"] * 100, 2) for v in eq],  # 起始 = 100
             positions=r["positions"], cash=r["cash"],
-            pending=r["pending"] if cfg.get("execution", "next_open") == "next_open" else [],
+            pending=r["pending"] if execution == "next_open" else [],
             recent_trades=r["trades"][-15:][::-1],
-        ))
+        )
+
+    results, raw = [], {}
+    for name, strat in strats:
+        r = engine.run(strat, wide, elig, m["initial_cash"], costs, execution=execution,
+                       band=cfg.get("rebalance_band", 0.02))
+        raw[name] = dict(label=strat.label, equity=r["equity"], weights=r["weights"])
+        weeks, pkg = package(name, strat, r)
+        results.append(pkg)
+
+    # 展望跟單：每週跟隨「下週展望」最好的策略
+    follow_log = []
+    fcfg = cfg.get("outlook_follow")
+    if fcfg:
+        fw, follow_log = follow.build_weights(raw, wide["close"].index, fcfg.get("pick", "med"),
+                                              exclude=tuple(fcfg.get("exclude", [])))
+        params = {k: v for k, v in fcfg.items() if k in ("stop_loss", "take_profit", "entry_dip")}
+        fs = strategies.Fixed(fw, label=fcfg.get("label", "展望跟單"), **params)
+        r = engine.run(fs, wide, elig, m["initial_cash"], costs, execution=execution)
+        weeks, pkg = package("follow", fs, r)
+        pkg["follow_log"] = follow_log[-12:]
+        results.append(pkg)
 
     out = dict(
         market=key, name=m["name"], currency=m["currency"], initial_cash=m["initial_cash"],
@@ -80,6 +99,10 @@ def run_market(key: str, cfg: dict, offline: bool = False, long: pd.DataFrame | 
         dates=[str(d.date()) for d in wide["close"].index],
         universe_size=int(wide["close"].shape[1]), eligible_today=int(elig.iloc[-1].sum()),
         regime=reg_info,
+        # 我的模擬倉用：全部股票的最新收盤價與名稱、交易成本設定
+        quotes=_quotes(wide["close"], names),
+        costs=dict(m["costs"], etf_prefix=m.get("etfs_prefix")),
+        follow_cfg=cfg.get("outlook_follow"),
         market_filter=_filter_state(wide["close"], m["benchmark"], mf),
         weeks=weeks, max_positions=k, exits=cfg.get("exits", {}), strategies=results,
         names={s: names.get(s, "") for s in _used_symbols(results)},
@@ -105,6 +128,13 @@ def weekly(eq: pd.Series, initial: float, n: int = 52) -> tuple[list[dict], list
     if weeks:  # 最後一週如果還沒到週五，標示為進行中
         weeks[-1]["done"] = eq.index[-1].dayofweek == 4
     return weeks[-n:], rows[-n:]
+
+
+def _quotes(close: pd.DataFrame, names: dict) -> dict:
+    """最近 10 個交易日內有成交的股票：{代號: [名稱, 最新收盤價]}。"""
+    recent = close.iloc[-10:].ffill().iloc[-1]
+    return {s: [names.get(s, "") if names.get(s, "") != s else "", round(float(p), 2)]
+            for s, p in recent.items() if pd.notna(p)}
 
 
 def _filter_state(close: pd.DataFrame, bench: str, mf: dict | None) -> dict | None:

@@ -98,11 +98,12 @@ class Strategy:
 
     def __init__(self, label: str = "", max_positions: int = 10, max_hold_days: int | None = None,
                  stop_loss: float | None = None, take_profit: float | None = None,
-                 market_filter: dict | None = None, **params):
+                 market_filter: dict | None = None, entry_dip: float | None = None, **params):
         self.label = label or self.__class__.__name__
         self.k = max_positions
         self.max_hold, self.stop_loss, self.take_profit = max_hold_days, stop_loss, take_profit
         self.market_filter = market_filter  # {"symbol": "0050.TW", "ma": 20} 或 None（不使用）
+        self.entry_dip = entry_dip          # 限價進場：比前一天收盤低多少才買（0.02 = 2%），None = 開盤直接買
         self.params = params
 
     def p(self, name, default):
@@ -243,6 +244,19 @@ class Momentum(Strategy):
                 row[picks] = 1.0 / self.k
             w.loc[dt] = row
         return w.ffill().fillna(0.0)
+
+
+class Fixed(Strategy):
+    """直接使用外部算好的權重（展望跟單用）。"""
+
+    engine_exits = True  # 停利停損由引擎處理
+
+    def __init__(self, weights: pd.DataFrame, **kw):
+        super().__init__(**kw)
+        self.weights = weights
+
+    def target_weights(self, wide, eligible):
+        return self.weights.reindex_like(wide["close"]).fillna(0.0)
 
 
 REGISTRY = {
