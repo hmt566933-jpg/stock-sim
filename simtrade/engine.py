@@ -47,6 +47,8 @@ def run(strategy: Strategy, wide: dict[str, pd.DataFrame], eligible: pd.DataFram
         target = {cols[j]: float(row[j]) for j in np.flatnonzero(row > 0)}
         if eng_exits and i > 0:
             banned &= set(target)  # 跟隨的策略不再持有時解除封鎖
+            if dates[i - 1].dayofweek == 4:
+                banned.clear()     # 每週五重新選策略後解除封鎖，避免長期持有的股票被停損後永遠買不回來
             prev = close.iloc[i - 1]
             for sym, q in acct.shares.items():
                 c = prev[sym]
