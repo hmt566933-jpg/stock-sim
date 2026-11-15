@@ -59,7 +59,8 @@ def _gemini(prompt: str, key: str) -> tuple[str, str]:
     r = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
                       headers={"x-goog-api-key": key, "content-type": "application/json"},
                       json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=120)
-    r.raise_for_status()
+    if r.status_code >= 400:
+        raise RuntimeError(f"HTTP {r.status_code}：{r.text[:300]}")
     parts = r.json()["candidates"][0]["content"]["parts"]
     return "".join(p.get("text", "") for p in parts).strip(), model
 
@@ -70,7 +71,8 @@ def _chat(prompt: str, key: str, base: str, model: str) -> tuple[str, str]:
     r = requests.post(f"{base}/chat/completions", timeout=120,
                       headers={"authorization": f"Bearer {key}", "content-type": "application/json"},
                       json={"model": model, "messages": [{"role": "user", "content": prompt}]})
-    r.raise_for_status()
+    if r.status_code >= 400:  # 把服務回的錯誤原因印出來，方便除錯（不含金鑰）
+        raise RuntimeError(f"HTTP {r.status_code}：{r.text[:300]}")
     return r.json()["choices"][0]["message"]["content"].strip(), model
 
 
@@ -92,6 +94,7 @@ def generate(out: dict, brief: dict) -> dict | None:
         key = os.environ.get(env, "").strip()
         if not key:
             continue
+        print(f"[AI] 使用 {name} 產生分析…")
         try:
             text, model = fn(prompt, key)
             if text:

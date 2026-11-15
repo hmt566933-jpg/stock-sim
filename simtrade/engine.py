@@ -80,16 +80,25 @@ def run(strategy: Strategy, wide: dict[str, pd.DataFrame], eligible: pd.DataFram
                       pnl_pct=round((q * float(last[s]) / acct.cost_basis[s] - 1) * 100, 2))
                  for s, q in sorted(acct.shares.items())]
     return dict(equity=eq, trades=acct.trades, positions=positions, cash=round(acct.cash, 2),
-                pending=_pending(weights.iloc[-1], acct, strategy))
+                pending=_pending(weights.iloc[-1], acct, strategy, last))
 
 
-def _pending(target: pd.Series, acct: Account, strategy: Strategy) -> list[dict]:
-    """最新收盤後的決定 → 下一個交易日預計要做的動作（給儀表板顯示）。"""
+def _pending(target: pd.Series, acct: Account, strategy: Strategy, last: pd.Series) -> list[dict]:
+    """最新收盤後的決定 → 下一個交易日預計要做的動作（給儀表板顯示）。
+    股數以最新收盤價估算；實際成交用隔天開盤價，股數可能略有不同。"""
     out = []
+    total = acct.market_value({s: float(last[s]) for s in acct.shares})
     for sym, w in target.items():
         held = acct.shares.get(sym, 0)
+        px = float(last[sym]) if pd.notna(last[sym]) else 0.0
         if w <= 0 and held > 0:
-            out.append(dict(symbol=sym, action="賣出"))
-        elif w > 0 and held == 0:
-            out.append(dict(symbol=sym, action="買進"))
+            out.append(dict(symbol=sym, action="賣出", qty=held, price=round(px, 2)))
+        elif w > 0 and held == 0 and px > 0:
+            qty = int(w * total // px)
+            if qty > 0:
+                out.append(dict(symbol=sym, action="買進", qty=qty, price=round(px, 2)))
+        elif w > 0 and held > 0 and strategy.rebalance and px > 0:
+            want = int(w * total // px)
+            if want != held and abs(want - held) * px > 0.02 * total:
+                out.append(dict(symbol=sym, action="加碼" if want > held else "減碼", qty=abs(want - held), price=round(px, 2)))
     return out

@@ -413,7 +413,7 @@ function drawWeekly(d) {
   const fc = d.strategies.filter(s => s.forecast && s.forecast.next).map(s => {
     const f = s.forecast.next, eqNow = s.equity[s.equity.length - 1] / 100 * d.initial_cash;
     return { s, ...f, money: eqNow * f.med / 100, acc: s.forecast.accuracy,
-             buys: s.pending.filter(p => p.action === "買進"), sells: s.pending.filter(p => p.action === "賣出") };
+             buys: s.pending.filter(p => p.action === "買進" || p.action === "加碼"), sells: s.pending.filter(p => p.action === "賣出" || p.action === "減碼") };
   });
   const lastDone = [...weeks].reverse().find(w => w.done) || weeks[last];
   const nextMon = new Date(new Date(lastDone.start).getTime() + 7 * 864e5).toISOString().slice(0, 10);
@@ -426,8 +426,11 @@ function drawWeekly(d) {
       <td>${r.buys.length || r.sells.length ? `買 ${r.buys.length}／賣 ${r.sells.length}` : "不動"}</td></tr>`).join("");
   $("wplan").innerHTML = fc.filter(r => r.buys.length || r.sells.length).map(r =>
     `<details><summary>${r.s.label}：下個交易日 買 ${r.buys.length} 檔、賣 ${r.sells.length} 檔</summary>
-      <p>${r.buys.map(p => `<span class="pill">買 ${stock(p.symbol)}</span>`).join("")}${r.sells.map(p => `<span class="pill">賣 ${stock(p.symbol)}</span>`).join("")}</p></details>`).join("") +
-    `<p class="note">「常見範圍」＝過去 80% 的週落在這個區間；「預估損益」＝目前資金 × 中位數週報酬；「過去命中」＝近 26 週猜對漲跌方向的比例。週一動作是依最新收盤訊號，週一開盤執行。</p>`;
+      <div class="scroll"><table><tr><th>動作</th><th>股票</th><th>股數</th><th>參考價</th><th>約當金額</th></tr>` +
+      [...r.sells, ...r.buys].map(p => `<tr><td>${p.action}</td><td>${stock(p.symbol)}</td><td>${p.qty != null ? fmtNum(p.qty) : "–"}</td>
+        <td>${p.price != null ? fmtNum(p.price) : "–"}</td><td>${p.qty != null ? fmtNum(Math.round(p.qty * p.price)) : "–"}</td></tr>`).join("") +
+      `</table></div></details>`).join("") +
+    `<p class="note">「常見範圍」＝過去 80% 的週落在這個區間；「預估損益」＝目前資金 × 中位數週報酬；「過去命中」＝近 26 週猜對漲跌方向的比例。週一動作是依最新收盤訊號，週一開盤執行；股數以最新收盤價估算，實際依開盤價成交。</p>`;
 
   // 展望準確度：每一週都只用那週之前的資料估計，再跟實際比
   const acc = d.strategies.filter(s => s.forecast && s.forecast.accuracy.weeks);
@@ -535,7 +538,7 @@ function drawDetail(d) {
     ex.stop_loss && `停損 ${Math.round(ex.stop_loss * 100)}%`, ex.take_profit && `停利 ${Math.round(ex.take_profit * 100)}%`]
     .filter(Boolean).join("、") + (ex.max_hold_days ? "（週動能輪動為每週換股）" : "");
   $("detail").innerHTML = d.strategies.map(s => {
-    const pend = s.pending.length ? s.pending.map(p => `<span class="pill">${p.action} ${stock(p.symbol)}</span>`).join("") : '<span class="muted">不動作</span>';
+    const pend = s.pending.length ? s.pending.map(p => `<span class="pill">${p.action} ${stock(p.symbol)}${p.qty ? ` ${fmtNum(p.qty)} 股` : ""}</span>`).join("") : '<span class="muted">不動作</span>';
     const pos = s.positions.length ? `<div class="scroll"><table><tr><th>股票</th><th>股數</th><th>均價</th><th>現價</th><th>市值</th><th>損益</th></tr>` +
       s.positions.map(p => `<tr><td>${stock(p.symbol)}</td><td>${fmtNum(p.qty)}</td><td>${fmtNum(p.avg_cost)}</td><td>${fmtNum(p.price)}</td><td>${fmtNum(p.value)}</td><td>${fmtPct(p.pnl_pct)}</td></tr>`).join("") +
       `</table></div>` : '<p class="muted">目前空手</p>';
