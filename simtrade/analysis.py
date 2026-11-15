@@ -21,12 +21,15 @@ def facts(out: dict) -> dict:
             win_weeks_12=sum(r > 0 for r in last12),
             next_up_prob=(f.get("next") or {}).get("up"), next_median=(f.get("next") or {}).get("med"),
             forecast_hit_rate=(f.get("accuracy") or {}).get("hit_rate"),
+            bull_annual=(s.get("regime") or {}).get("bull", {}).get("ann"),
+            bear_annual=(s.get("regime") or {}).get("bear", {}).get("ann"),
             monday_buys=sum(p["action"] == "買進" for p in s["pending"]),
             monday_sells=sum(p["action"] == "賣出" for p in s["pending"]),
         ))
     return dict(market=out["name"], currency=cur, data_until=out["last_date"],
                 week=f'{weeks[wi]["start"]} ~ {weeks[wi]["end"]}' if weeks else None,
                 initial_cash=out["initial_cash"], market_filter=out.get("market_filter"),
+                market_regime={k: v for k, v in (out.get("regime") or {}).items() if k != "bear_periods"},
                 benchmark=bench["label"] if bench else None, strategies=rows)
 
 

@@ -182,6 +182,15 @@
     </section>
   </div>
 
+  <div data-page="total" id="regimecard">
+    <section class="card">
+      <h2>牛市 vs 熊市</h2>
+      <p id="regnow" style="margin:0 0 8px"></p>
+      <div class="scroll"><table id="regtbl"></table></div>
+      <p class="note" id="regnote"></p>
+    </section>
+  </div>
+
   <div data-page="hold">
     <section class="card">
       <h2>各策略持倉與下一個交易日動作</h2>
@@ -250,6 +259,7 @@ function render() {
   seg($("mkt"), Object.keys(DATA).map(k => [DATA[k].name, k]), state.market, v => { state.market = v; state.week = null; render(); });
   drawWeekly(d);
   drawFilter(d);
+  drawRegime(d);
   drawAnalysis(d);
   $("copybrief").style.display = d.ai_brief ? "" : "none";
   if (!state.shown[state.market]) state.shown[state.market] = defaultShown(d);
@@ -322,6 +332,14 @@ function drawChart(dates, series) {
       <text x="${x(n - 1) + 8}" y="${e.y + 4}" font-size="11" fill="var(--text-secondary)">${shortLabel(e.s.label)} ${Math.round(v)}</text>`;
   }
 
+  // 熊市期間畫灰色底色
+  let shade = "";
+  for (const p of (DATA[state.market].regime?.bear_periods || [])) {
+    const i0 = dates.findIndex(x => x >= p.start); if (i0 < 0) continue;
+    let i1 = dates.findIndex(x => x > p.end); i1 = (i1 < 0 ? n : i1) - 1; if (i1 < i0) continue;
+    shade += `<rect x="${x(i0)}" y="${m.t}" width="${Math.max(1, x(i1) - x(i0))}" height="${ih}" fill="var(--text-muted)" opacity="0.10"/>`;
+  }
+  grid = shade + grid;
   box.querySelector("svg")?.remove();
   box.insertAdjacentHTML("afterbegin",
     `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="各策略淨值走勢">
@@ -361,7 +379,7 @@ function stock(sym) {
   const code = sym.replace(/\.TWO?$/, "");
   return nm && nm !== sym ? `${code} ${nm}` : code;
 }
-function shortLabel(s) { return s.replace(/（.*?）/g, "").split(" ")[0]; }
+function shortLabel(s) { const t = s.replace(/（.*?）/g, "").trim(); return t.length > 8 ? t.slice(0, 8) : t; }
 function niceStep(raw) { const p = Math.pow(10, Math.floor(Math.log10(raw))); const f = raw / p; return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p; }
 
 const md = s => s.slice(5).replace("-", "/");
@@ -495,6 +513,23 @@ function drawAnalysis(d) {
   if (inList) html += "</ul>";
   $("aitext").innerHTML = html;
   $("aisrc").textContent = `${a.provider}（${a.model}）根據 ${d.last_date} 的資料撰寫，內容可能有誤，請以數字為準。`;
+}
+
+function drawRegime(d) {
+  const g = d.regime;
+  $("regimecard").style.display = g && state.tab === "total" ? "" : "none";
+  if (!g) return;
+  $("regnow").innerHTML = `<span class="pill">目前：${g.now || "–"}</span> <span class="muted">大盤 ${g.bench_price} ${g.now === "牛市" ? "在" : "低於"} ${g.ma} 日均線 ${g.ma_value ?? "–"}</span>`;
+  const b = d.strategies.find(s => s.key === "benchmark");
+  const cell = (v, ref) => v == null ? "–" : `${fmtPct(v)}${ref != null && v > ref ? ' <span class="muted">▲</span>' : ""}`;
+  $("regtbl").innerHTML = `<tr><th>策略</th><th>牛市年化</th><th>熊市年化</th><th>熊市勝率（日）</th><th>熊市波動</th></tr>` +
+    d.strategies.filter(s => s.regime).map(s => {
+      const bu = s.regime.bull, be = s.regime.bear, isB = s.key === "benchmark";
+      return `<tr><td><i class="key ${keyCls(s.key)}" style="border-color:${color(s.key)}"></i>${s.label}</td>
+        <td>${cell(bu.ann, isB ? null : b?.regime?.bull.ann)}</td><td>${cell(be.ann, isB ? null : b?.regime?.bear.ann)}</td>
+        <td>${be.win_days == null ? "–" : be.win_days + "%"}</td><td>${be.vol == null ? "–" : be.vol.toFixed(1) + "%"}</td></tr>`;
+    }).join("");
+  $("regnote").textContent = `判斷方式：前一天大盤收盤在 ${g.ma} 日均線之上＝牛市，之下＝熊市。模擬期間牛市 ${g.bull_days} 天、熊市 ${g.bear_days} 天（熊市樣本較少，年化數字波動大）。▲＝該市況下贏過大盤。淨值走勢圖的灰色底色＝熊市期間。`;
 }
 
 function drawFilter(d) {

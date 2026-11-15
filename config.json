@@ -6,6 +6,7 @@
       "initial_cash": 1000000,
       "start_date": "2020-01-01",
       "benchmark": "0050.TW",
+      "regime_ma": 240,
       "universe": {
         "source": "twse_tpex",
         "min_turnover": 50000000,
@@ -27,6 +28,7 @@
       "initial_cash": 100000,
       "start_date": "2020-01-01",
       "benchmark": "SPY",
+      "regime_ma": 200,
       "universe": {
         "source": "sp500",
         "min_turnover": 20000000,

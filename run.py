@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from simtrade import analysis, data, engine, forecast, metrics, strategies, universe
+from simtrade import analysis, data, engine, forecast, metrics, regime, strategies, universe
 from simtrade.broker import Costs
 
 ROOT = Path(__file__).resolve().parent
@@ -49,6 +49,8 @@ def run_market(key: str, cfg: dict, offline: bool = False, long: pd.DataFrame | 
     strats += [(name, strategies.build(name, scfg, defaults)) for name, scfg in cfg["strategies"].items()]
     print(f"[{m['name']}] 股票池 {wide['close'].shape[1]} 檔，最新一天可交易 {int(elig.iloc[-1].sum())} 檔")
 
+    reg_state, reg_info = regime.summary(wide["close"][m["benchmark"]], m.get("regime_ma", 200))
+
     results = []
     for name, strat in strats:
         r = engine.run(strat, wide, elig, m["initial_cash"], costs,
@@ -64,6 +66,7 @@ def run_market(key: str, cfg: dict, offline: bool = False, long: pd.DataFrame | 
         results.append(dict(
             weekly=wrows, week_trades=week_trades[::-1], forecast=fc,
             key=name, label=strat.label, stats=metrics.summarize(eq, r["trades"]),
+            regime=regime.split_returns(eq, reg_state),
             equity=[round(v / m["initial_cash"] * 100, 2) for v in eq],  # 起始 = 100
             positions=r["positions"], cash=r["cash"],
             pending=r["pending"] if cfg.get("execution", "next_open") == "next_open" else [],
@@ -76,6 +79,7 @@ def run_market(key: str, cfg: dict, offline: bool = False, long: pd.DataFrame | 
         updated_at=datetime.now(TPE).strftime("%Y-%m-%d %H:%M"),
         dates=[str(d.date()) for d in wide["close"].index],
         universe_size=int(wide["close"].shape[1]), eligible_today=int(elig.iloc[-1].sum()),
+        regime=reg_info,
         market_filter=_filter_state(wide["close"], m["benchmark"], mf),
         weeks=weeks, max_positions=k, exits=cfg.get("exits", {}), strategies=results,
         names={s: names.get(s, "") for s in _used_symbols(results)},
