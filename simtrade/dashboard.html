@@ -825,7 +825,8 @@ function drawDetail(d) {
       `</table></div>` : "";
     return `<details><summary><i class="key ${keyCls(s.key)}" style="border-color:${color(s.key)}"></i>${s.label}</summary>
       <p>下一個交易日：${pend}</p>
-      <p class="muted">現金 ${fmtNum(s.cash)} ${d.currency}</p>${pos}
+      <p class="muted">總資產 <b style="color:var(--text-primary)">${fmtNum(Math.round(s.equity[s.equity.length - 1] / 100 * d.initial_cash))}</b> ${d.currency}
+        （報酬 ${fmtPct(s.stats.total_return)}）｜其中現金 ${fmtNum(Math.round(s.cash))}、持股 ${fmtNum(Math.round(s.positions.reduce((a, p) => a + p.value, 0)))}</p>${pos}
       ${tr ? '<p class="muted" style="margin-top:12px">最近交易</p>' + tr : ""}</details>`;
   }).join("");
 }
