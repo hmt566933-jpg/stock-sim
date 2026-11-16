@@ -14,12 +14,13 @@ out.mkdir(parents=True, exist_ok=True)
 for p in sorted((ROOT / "data").glob("*_daily.parquet")):
     market = p.stem.replace("_daily", "")
     df = pd.read_parquet(p)
-    for c in ("open", "high", "low", "close"):
-        df[c] = df[c].astype("float32")
     df["volume"] = df["volume"].fillna(0).round().astype("int64")
     for year, g in df.groupby(df["date"].dt.year):
-        f = out / f"{market}_{year}.parquet"
-        g.reset_index(drop=True).to_parquet(f, compression="zstd", index=False)
+        # 用 csv.gz：任何環境都讀得到（不需要 pyarrow）
+        f = out / f"{market}_{year}.csv.gz"
+        g = g.copy()
+        g["date"] = g["date"].dt.strftime("%Y-%m-%d")
+        g.to_csv(f, index=False, float_format="%.4f", compression={"method": "gzip", "compresslevel": 9})
         print(f"{f.name}: {len(g):,} 筆, {f.stat().st_size / 1e6:.1f} MB")
 
 for f in (ROOT / "data").glob("universe_*.json"):
