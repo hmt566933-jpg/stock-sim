@@ -62,6 +62,19 @@ jobs:
           OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL }}
         run: python run.py --market ${{ steps.pick.outputs.market }}
 
+      # 把股價資料打包成下載檔（只保留 1 天），方便離線分析
+      - name: 上傳股價資料
+        uses: actions/upload-artifact@v4
+        with:
+          name: price-data
+          path: |
+            data/*.parquet
+            data/*.csv.gz
+            data/universe_*.json
+          retention-days: 1
+          if-no-files-found: ignore
+          compression-level: 0
+
       - name: 存回結果
         run: |
           git config user.name "sim-bot"
