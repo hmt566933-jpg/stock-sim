@@ -62,18 +62,17 @@ jobs:
           OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL }}
         run: python run.py --market ${{ steps.pick.outputs.market }}
 
-      # 把股價資料打包成下載檔（只保留 1 天），方便離線分析
-      - name: 上傳股價資料
-        uses: actions/upload-artifact@v4
-        with:
-          name: price-data
-          path: |
-            data/*.parquet
-            data/*.csv.gz
-            data/universe_*.json
-          retention-days: 1
-          if-no-files-found: ignore
-          compression-level: 0
+      # 股價資料存到獨立的 data 分支（每次覆蓋、只留最新一份），方便離線分析；不影響主程式與網頁
+      - name: 存股價資料到 data 分支
+        run: |
+          python tools/export_data.py /tmp/data_branch
+          cd /tmp/data_branch
+          git init -q -b data
+          git config user.name "sim-bot"
+          git config user.email "sim-bot@users.noreply.github.com"
+          git add -A
+          git commit -qm "股價資料 $(TZ=Asia/Taipei date +'%F %H:%M')"
+          git push -f -q "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" data
 
       - name: 存回結果
         run: |
