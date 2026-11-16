@@ -14,6 +14,7 @@ import json
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from simtrade import analysis, data, engine, follow, forecast, metrics, regime, strategies, universe
@@ -46,7 +47,8 @@ def run_market(key: str, cfg: dict, offline: bool = False, long: pd.DataFrame | 
         defaults["market_filter"] = {"symbol": m["benchmark"], **mf}
 
     strats = [("benchmark", strategies.Benchmark(m["benchmark"], label=f"大盤 {m['benchmark']}"))]
-    strats += [(name, strategies.build(name, scfg, defaults)) for name, scfg in cfg["strategies"].items()]
+    strats += [(name, strategies.build(name, scfg, defaults)) for name, scfg in cfg["strategies"].items()
+               if _active(scfg, key)]
     print(f"[{m['name']}] 股票池 {wide['close'].shape[1]} 檔，最新一天可交易 {int(elig.iloc[-1].sum())} 檔")
 
     reg_state, reg_info = regime.summary(wide["close"][m["benchmark"]], m.get("regime_ma", 200))
@@ -79,6 +81,21 @@ def run_market(key: str, cfg: dict, offline: bool = False, long: pd.DataFrame | 
         weeks, pkg = package(name, strat, r)
         results.append(pkg)
 
+    # 組合策略（例如牛熊切換）：依大盤狀態混合幾個策略的持股
+    bull_now = _bull_state(wide["close"][m["benchmark"]], m.get("regime_ma", 200))
+    for cname, ccfg in cfg.get("combos", {}).items():
+        if not _active(ccfg, key):
+            continue
+        cw = _combo_weights(raw, ccfg, bull_now)
+        if cw is None:
+            continue
+        cs = strategies.Fixed(cw, label=ccfg.get("label", cname))
+        cs.rebalance = True  # 子策略的比例會變動，要跟著調整部位
+        r = engine.run(cs, wide, elig, m["initial_cash"], costs, execution=execution,
+                       band=cfg.get("rebalance_band", 0.02))
+        raw[cname] = dict(label=cs.label, equity=r["equity"], weights=r["weights"])
+        results.append(package(cname, cs, r)[1])
+
     # 展望跟單：每週跟隨「下週展望」最好的策略
     follow_log = []
     fcfg = cfg.get("outlook_follow")
@@ -102,11 +119,25 @@ def run_market(key: str, cfg: dict, offline: bool = False, long: pd.DataFrame | 
             continue
         vraw, vres = {"benchmark": raw["benchmark"]}, [light(results[0])]
         for name, scfg in cfg["strategies"].items():
+            if not _active(scfg, key):
+                continue
             st = strategies.build(name, {**scfg, "sizing": sz}, defaults)
             r = engine.run(st, wide, elig, m["initial_cash"], costs, execution=execution,
                            band=cfg.get("rebalance_band", 0.02))
             vraw[name] = dict(label=st.label, equity=r["equity"], weights=r["weights"])
             vres.append(light(package(name, st, r)[1]))
+        for cname, ccfg in cfg.get("combos", {}).items():
+            if not _active(ccfg, key):
+                continue
+            cw = _combo_weights(vraw, ccfg, bull_now)
+            if cw is None:
+                continue
+            cs = strategies.Fixed(cw, label=ccfg.get("label", cname))
+            cs.rebalance = True
+            r = engine.run(cs, wide, elig, m["initial_cash"], costs, execution=execution,
+                           band=cfg.get("rebalance_band", 0.02))
+            vraw[cname] = dict(label=cs.label, equity=r["equity"], weights=r["weights"])
+            vres.append(light(package(cname, cs, r)[1]))
         if fcfg:
             fw, _ = follow.build_weights(vraw, wide["close"].index, fcfg.get("pick", "med"),
                                          exclude=tuple(fcfg.get("exclude", [])))
@@ -155,6 +186,39 @@ def weekly(eq: pd.Series, initial: float, n: int = 52) -> tuple[list[dict], list
     if weeks:  # 最後一週如果還沒到週五，標示為進行中
         weeks[-1]["done"] = eq.index[-1].dayofweek == 4
     return weeks[-n:], rows[-n:]
+
+
+def _active(scfg: dict, market: str) -> bool:
+    """策略可用 "markets": ["tw"] 限定市場；[] 代表停用；沒寫就兩個市場都跑。"""
+    mk = scfg.get("markets")
+    return mk is None or market in mk
+
+
+def _bull_state(bench: pd.Series, ma: int) -> pd.Series:
+    """當天收盤後的市況（給組合策略做決定用，不會用到隔天的資料）。"""
+    b = bench.ffill()
+    line = b.rolling(ma, min_periods=ma).mean()
+    state = (b > line) | line.isna()  # 年線還算不出來的初期視為牛市
+    # 只在每週最後一個交易日切換，避免大盤在年線附近來回時天天換股
+    per = pd.Series(state.index.to_period("W"), index=state.index)
+    week_end = (per != per.shift(-1))
+    return state.where(week_end).ffill().fillna(True).astype(bool)
+
+
+def _combo_weights(raw: dict, ccfg: dict, bull: pd.Series) -> pd.DataFrame | None:
+    """牛市用 bull 配比、熊市用 bear 配比，把各策略的目標持股加權相加。"""
+    need = set(ccfg["bull"]) | set(ccfg["bear"])
+    if not need <= set(raw):
+        print(f"[警告] 組合 {ccfg.get('label')} 缺少策略 {need - set(raw)}，略過")
+        return None
+    base = next(iter(raw.values()))["weights"]
+    mix = {}
+    for side in ("bull", "bear"):
+        w = sum(raw[k]["weights"].reindex_like(base).fillna(0.0) * a for k, a in ccfg[side].items())
+        mix[side] = w
+    mask = bull.reindex(base.index).fillna(True).to_numpy()[:, None]
+    return pd.DataFrame(np.where(mask, mix["bull"].to_numpy(), mix["bear"].to_numpy()),
+                        index=base.index, columns=base.columns)
 
 
 def _quotes(close: pd.DataFrame, names: dict) -> dict:

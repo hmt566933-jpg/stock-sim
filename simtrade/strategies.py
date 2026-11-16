@@ -317,7 +317,7 @@ REGISTRY = {
 
 def build(name: str, cfg: dict, defaults: dict) -> Strategy:
     """defaults：config 裡的共同設定（max_positions、exits）；個別策略可覆寫。"""
-    params = {**defaults, **{k: v for k, v in cfg.items() if k not in ("label", "type")}}
+    params = {**defaults, **{k: v for k, v in cfg.items() if k not in ("label", "type", "markets")}}
     if params.get("market_filter") is False:  # 個別策略可用 "market_filter": false 關掉濾網
         params["market_filter"] = None
     cls = REGISTRY[cfg.get("type", name)]

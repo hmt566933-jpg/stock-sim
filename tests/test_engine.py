@@ -75,7 +75,7 @@ def test_all_strategies_run():
         st = strategies.build(name, scfg, defaults)
         w = st.target_weights(wide, elig)
         assert (w.sum(axis=1) <= 1 + 1e-9).all(), name
-        assert ((w > 0).sum(axis=1) <= cfg["max_positions"]).all(), name
+        assert ((w > 0).sum(axis=1) <= st.k).all(), name
         assert (w > 0).to_numpy().any(), f"{name} 從來沒有進場"
 
 
@@ -113,7 +113,9 @@ def test_ai_brief():
     runner.DOCS = Path(__file__).resolve().parent / "_out"
     out = runner.run_market("tw", cfg, long=fake_long(syms, seed=3), names={s: s for s in syms})
     brief = out["ai_brief"]
-    assert brief["market"] == "台股" and len(brief["strategies"]) == 2 + len(cfg["strategies"])
+    n = sum(runner._active(c, "tw") for c in cfg["strategies"].values()) + \
+        sum(runner._active(c, "tw") for c in cfg.get("combos", {}).values())
+    assert brief["market"] == "台股" and len(brief["strategies"]) == 2 + n
     assert out["market_filter"] is not None
 
 
@@ -154,6 +156,18 @@ def test_resize_keeps_total_and_cap():
     assert (r.max(axis=1) <= 0.2 + 1e-9).all()             # 單檔最多 2 倍
     assert r.loc[idx[0], "C"] == 0.2 and r.loc[idx[0], "D"] == 0  # 沒持有的不會被分到
     assert r.loc[idx[2], "A"] == 0.1                        # 沒分數時維持平均
+
+
+def test_combo_switches_on_regime():
+    import run as runner
+    idx = pd.bdate_range("2024-01-01", periods=4)
+    wa = pd.DataFrame({"X": 0.1, "Y": 0.0}, index=idx)
+    wb = pd.DataFrame({"X": 0.0, "Y": 0.1}, index=idx)
+    raw = {"a": dict(weights=wa), "b": dict(weights=wb)}
+    bull = pd.Series([True, True, False, False], index=idx)
+    w = runner._combo_weights(raw, {"bull": {"a": 1.0}, "bear": {"a": 0.5, "b": 0.5}}, bull)
+    assert w.loc[idx[0], "X"] == 0.1 and w.loc[idx[0], "Y"] == 0
+    assert w.loc[idx[3], "X"] == 0.05 and w.loc[idx[3], "Y"] == 0.05
 
 
 def test_round_trip_and_limits():
@@ -205,7 +219,9 @@ def test_full_pipeline(tmp=Path(__file__).resolve().parent / "_out"):
                 for t in s["recent_trades"]:
                     if t["side"] == "買" and t["symbol"].startswith("S"):
                         assert (int(t["symbol"][1:]) + 1) % 5 != 0, t
-        assert len(out["strategies"]) == 2 + len(cfg["strategies"])  # 大盤 + 策略 + 展望跟單
+        n_active = sum(runner._active(c, key) for c in cfg["strategies"].values())
+        n_combo = sum(runner._active(c, key) for c in cfg.get("combos", {}).values())
+        assert len(out["strategies"]) == 2 + n_active + n_combo  # 大盤 + 策略 + 組合 + 展望跟單
         assert all(s["forecast"]["accuracy"]["weeks"] > 0 for s in out["strategies"])
         for s in out["strategies"]:
             assert s["equity"][0] == 100 and s["cash"] >= 0
