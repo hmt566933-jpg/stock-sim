@@ -170,6 +170,16 @@ def test_combo_switches_on_regime():
     assert w.loc[idx[3], "X"] == 0.05 and w.loc[idx[3], "Y"] == 0.05
 
 
+def test_odd_lot_slippage():
+    c = Costs(fee_rate=0, min_fee=0, sell_tax_stock=0, price_limit=None, lot_size=1000, odd_lot_slippage=0.003)
+    assert c.fill_price("buy", 2000, 100) == 100                      # 整張：開盤價
+    assert abs(c.fill_price("buy", 1500, 100) - (1000 * 100 + 500 * 100.3) / 1500) < 1e-9
+    assert abs(c.fill_price("sell", 500, 100) - 99.7) < 1e-9          # 全部零股：賣便宜 0.3%
+    a = Account(cash=100_000, costs=c)
+    a.buy(pd.Timestamp("2024-01-02"), "X", 500, 100)
+    assert abs(a.cash - (100_000 - 500 * 100.3)) < 1e-6
+
+
 def test_round_trip_and_limits():
     c = Costs(fee_rate=0.001425, fee_discount=1, min_fee=20)
     a = Account(cash=100_000, costs=c)
